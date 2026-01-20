@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0f1a;
+        --panel: #141a2b;
+        --accent: #ffb000;
+        --accent-2: #6fffe9;
+        --text: #e6edf5;
+        --muted: #93a1bd;
+        --success: #3ce6a3;
+        --danger: #ff6b6b;
+        --shadow: 0 20px 45px rgba(0, 0, 0, 0.25);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+        background: radial-gradient(circle at top, #1f2942 0%, #0b0f1a 50%, #06070c 100%);
+        color: var(--text);
+      }
+
+      header {
+        padding: 32px 48px 16px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .title {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 32px;
+        letter-spacing: 0.04em;
+      }
+
+      .subtitle {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .actions {
+        display: flex;
+        gap: 12px;
+      }
+
+      button {
+        background: linear-gradient(135deg, var(--accent), #f05d23);
+        border: none;
+        color: #1a1205;
+        padding: 10px 18px;
+        font-weight: 600;
+        border-radius: 999px;
+        cursor: pointer;
+        box-shadow: var(--shadow);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      button.secondary {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+      }
+
+      button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+      }
+
+      main {
+        padding: 0 48px 48px;
+        display: grid;
+        gap: 24px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 24px;
+      }
+
+      .card {
+        background: linear-gradient(145deg, rgba(20, 26, 43, 0.95), rgba(18, 23, 38, 0.95));
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 18px;
+        padding: 20px;
+        box-shadow: var(--shadow);
+      }
+
+      .card h2 {
+        margin: 0 0 12px;
+        font-size: 18px;
+      }
+
+      .metric {
+        font-size: 28px;
+        font-weight: 700;
+      }
+
+      .metric-sub {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .pill.positive {
+        color: var(--success);
+      }
+
+      .pill.negative {
+        color: var(--danger);
+      }
+
+      .chart-wrap {
+        position: relative;
+        height: 220px;
+      }
+
+      .list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .list-item {
+        padding: 12px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .list-item strong {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--accent-2);
+      }
+
+      .calculator {
+        display: grid;
+        gap: 12px;
+      }
+
+      .calculator label {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .calculator input {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(0, 0, 0, 0.2);
+        color: var(--text);
+      }
+
+      .highlight {
+        border-left: 3px solid var(--accent);
+        padding-left: 12px;
+      }
+
+      .footer-note {
+        text-align: center;
+        font-size: 12px;
+        color: var(--muted);
+        padding-bottom: 32px;
+      }
+
+      @media (max-width: 720px) {
+        header,
+        main {
+          padding: 24px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="title">
+        <h1>Bitcoin Pulse Command Center</h1>
+        <div class="subtitle">Creative insight feed powered by your Google Sheet.</div>
+      </div>
+      <div class="actions">
+        <button id="refresh">Refresh Live Data</button>
+        <button id="toggleTheme" class="secondary">Focus Mode</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="grid">
+        <div class="card">
+          <h2>BTC Live Price</h2>
+          <div class="metric" id="price">--</div>
+          <div class="pill" id="priceChange">--</div>
+          <div class="metric-sub">Real-time value pulled from your sheet formula.</div>
+        </div>
+        <div class="card">
+          <h2>Total Bitcoin Outstanding</h2>
+          <div class="metric" id="totalBitcoin">--</div>
+          <div class="metric-sub">Circulating supply snapshot.</div>
+        </div>
+        <div class="card">
+          <h2>Hashrate Pulse</h2>
+          <div class="metric" id="hashrate">--</div>
+          <div class="metric-sub">Network resilience and mining momentum.</div>
+        </div>
+        <div class="card">
+          <h2>Satoshi Insight</h2>
+          <div class="highlight" id="satoshiInfo">--</div>
+          <div class="metric-sub">Founder signal & ethos reminder.</div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Fluctuations & Trends</h2>
+          <div class="chart-wrap">
+            <canvas id="trendChart"></canvas>
+          </div>
+          <div class="metric-sub">Rolling shifts from your trends sheet.</div>
+        </div>
+        <div class="card">
+          <h2>Satoshi / BTC / USD Calculator</h2>
+          <div class="calculator">
+            <div>
+              <label for="btcInput">BTC</label>
+              <input id="btcInput" type="number" step="0.00000001" placeholder="0.25" />
+            </div>
+            <div>
+              <label for="satsInput">Satoshis</label>
+              <input id="satsInput" type="number" step="1" placeholder="25000000" />
+            </div>
+            <div>
+              <label for="usdInput">USD</label>
+              <input id="usdInput" type="number" step="0.01" placeholder="15000" />
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Mining Radar</h2>
+          <div class="list" id="miningList"></div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Satoshi Emails - Most Insightful</h2>
+          <div class="list" id="emailList"></div>
+        </div>
+        <div class="card">
+          <h2>Latest Research</h2>
+          <div class="list" id="researchList"></div>
+        </div>
+        <div class="card">
+          <h2>Highlights</h2>
+          <div class="list" id="highlightsList"></div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Most Interesting</h2>
+          <div class="list" id="interestingList"></div>
+        </div>
+        <div class="card">
+          <h2>Creative Info & Notes</h2>
+          <div class="list" id="creativeList"></div>
+        </div>
+        <div class="card">
+          <h2>Market Mood</h2>
+          <div class="list" id="moodList"></div>
+        </div>
+      </section>
+    </main>
+
+    <div class="footer-note">Update your Google Sheet to refresh the dashboard feed.</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+      const state = {
+        price: 0,
+        chart: null,
+        focusMode: false,
+      };
+
+      const formatCurrency = (value) =>
+        value ? value.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : '--';
+
+      const formatNumber = (value) =>
+        value ? value.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '--';
+
+      const updateCalculator = ({ btc, sats, usd }, source) => {
+        const btcInput = document.getElementById('btcInput');
+        const satsInput = document.getElementById('satsInput');
+        const usdInput = document.getElementById('usdInput');
+        if (source !== 'btc') btcInput.value = btc || '';
+        if (source !== 'sats') satsInput.value = sats || '';
+        if (source !== 'usd') usdInput.value = usd || '';
+      };
+
+      const wireCalculator = () => {
+        const btcInput = document.getElementById('btcInput');
+        const satsInput = document.getElementById('satsInput');
+        const usdInput = document.getElementById('usdInput');
+
+        btcInput.addEventListener('input', () => {
+          const btc = parseFloat(btcInput.value);
+          if (!state.price || Number.isNaN(btc)) return updateCalculator({ btc: btcInput.value }, 'btc');
+          const sats = Math.round(btc * 100000000);
+          const usd = btc * state.price;
+          updateCalculator({ btc, sats, usd }, 'btc');
+        });
+
+        satsInput.addEventListener('input', () => {
+          const sats = parseFloat(satsInput.value);
+          if (!state.price || Number.isNaN(sats)) return updateCalculator({ sats: satsInput.value }, 'sats');
+          const btc = sats / 100000000;
+          const usd = btc * state.price;
+          updateCalculator({ btc, sats, usd }, 'sats');
+        });
+
+        usdInput.addEventListener('input', () => {
+          const usd = parseFloat(usdInput.value);
+          if (!state.price || Number.isNaN(usd)) return updateCalculator({ usd: usdInput.value }, 'usd');
+          const btc = usd / state.price;
+          const sats = Math.round(btc * 100000000);
+          updateCalculator({ btc, sats, usd }, 'usd');
+        });
+      };
+
+      const renderList = (targetId, items, fallback) => {
+        const target = document.getElementById(targetId);
+        target.innerHTML = '';
+        if (!items || !items.length) {
+          target.innerHTML = `<div class="list-item">${fallback}</div>`;
+          return;
+        }
+        items.forEach((item) => {
+          const values = Object.values(item).filter((value) => value !== '');
+          const title = values.shift() || 'Insight';
+          const description = values.join(' • ');
+          const element = document.createElement('div');
+          element.className = 'list-item';
+          element.innerHTML = `<strong>${title}</strong><div>${description}</div>`;
+          target.appendChild(element);
+        });
+      };
+
+      const renderChart = (trends) => {
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        const labels = trends.map((entry) => entry.Label || entry.Date || entry.Period || '');
+        const values = trends.map((entry) => Number(entry.Value || entry.Price || entry.Change || 0));
+
+        if (state.chart) {
+          state.chart.destroy();
+        }
+
+        state.chart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Trend Pulse',
+                data: values,
+                borderColor: '#ffb000',
+                backgroundColor: 'rgba(255, 176, 0, 0.2)',
+                fill: true,
+                tension: 0.3,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+            },
+            scales: {
+              x: {
+                grid: { color: 'rgba(255,255,255,0.05)' },
+                ticks: { color: '#93a1bd' },
+              },
+              y: {
+                grid: { color: 'rgba(255,255,255,0.05)' },
+                ticks: { color: '#93a1bd' },
+              },
+            },
+          },
+        });
+      };
+
+      const applyData = (data) => {
+        state.price = data.price || 0;
+        document.getElementById('price').textContent = formatCurrency(data.price);
+        const change = data.priceChange;
+        const changeElement = document.getElementById('priceChange');
+        if (change === null || change === undefined) {
+          changeElement.textContent = 'Awaiting 24h change';
+          changeElement.className = 'pill';
+        } else {
+          const positive = change >= 0;
+          changeElement.textContent = `${positive ? '▲' : '▼'} ${change.toFixed(2)}% 24h`;
+          changeElement.className = `pill ${positive ? 'positive' : 'negative'}`;
+        }
+
+        document.getElementById('totalBitcoin').textContent = formatNumber(data.totalBitcoin) + ' BTC';
+        document.getElementById('hashrate').textContent = data.hashrateValue ? data.hashrateValue : 'Awaiting feed';
+        document.getElementById('satoshiInfo').textContent =
+          data.satoshiQuote || 'Add a “satoshi_info” entry in the sheet for a featured quote.';
+
+        renderChart(data.trends || []);
+        renderList('miningList', data.mining, 'Add a Mining sheet to display block production signals.');
+        renderList('emailList', data.emails, 'Curate Satoshi email highlights in the SatoshiEmails sheet.');
+        renderList('researchList', data.research, 'Link your latest research entries in the Research sheet.');
+        renderList('highlightsList', data.highlights, 'List major wins in the Highlights sheet.');
+        renderList('interestingList', data.interesting, 'Drop the most interesting finds in MostInteresting.');
+
+        const creative = Object.entries(data.summary || {})
+          .filter(([key]) => ['creative_info', 'creative_note', 'creative'].some((prefix) => key.startsWith(prefix)))
+          .map(([key, value]) => ({ Key: key.replace(/_/g, ' '), Detail: value }));
+        renderList('creativeList', creative, 'Add creative_info entries in column A/B for riffs and ideas.');
+
+        const mood = Object.entries(data.summary || {})
+          .filter(([key]) => ['trend', 'mood', 'signal', 'fluctuation'].some((prefix) => key.startsWith(prefix)))
+          .map(([key, value]) => ({ Key: key.replace(/_/g, ' '), Detail: value }));
+        renderList('moodList', mood, 'Add trend/mood entries to the Summary sheet for quick signals.');
+      };
+
+      const loadData = () => {
+        google.script.run.withSuccessHandler(applyData).getDashboardData();
+      };
+
+      document.getElementById('refresh').addEventListener('click', loadData);
+      document.getElementById('toggleTheme').addEventListener('click', () => {
+        state.focusMode = !state.focusMode;
+        document.body.style.background = state.focusMode
+          ? 'radial-gradient(circle at top, #0a0f1f 0%, #070a12 80%)'
+          : 'radial-gradient(circle at top, #1f2942 0%, #0b0f1a 50%, #06070c 100%)';
+      });
+
+      wireCalculator();
+      loadData();
+    </script>
+  </body>
+</html>
