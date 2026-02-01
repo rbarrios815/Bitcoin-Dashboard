@@ -286,6 +286,9 @@
     .progress-meta b{
       color:var(--text);
     }
+    .view-controls{
+      margin: 12px 0 16px;
+    }
   </style>
 </head>
 
@@ -295,10 +298,6 @@
       <div>
         <div class="title" id="pageTitle">Commodity Price Tracker</div>
         <div class="sub" id="status">Loaded. Run <b>setupOnce()</b> once in Apps Script, then use the buttons here.</div>
-        <div class="row" style="margin-top:8px;">
-          <span class="filter-label">Commodity view</span>
-          <div class="toggle-group" id="commodityToggle" role="group" aria-label="Commodity view toggle"></div>
-        </div>
         <div class="progress-wrap" id="fetchProgress" aria-live="polite">
           <div class="progress-bar" aria-hidden="true"><span id="fetchProgressBar"></span></div>
           <div class="progress-meta" id="fetchProgressMeta">Fetching latest snapshot…</div>
@@ -314,39 +313,44 @@
       </div>
     </div>
 
+    <div class="card">
+      <h3>Basket inflation</h3>
+      <div class="kpis">
+        <div class="kpi">
+          <div class="label">BTC/USD</div>
+          <div class="val" id="btcUsd">—</div>
+        </div>
+        <div class="kpi">
+          <div class="label" id="basketIndexLabel">Basket Index (USD)</div>
+          <div class="val" id="basketIndex">—</div>
+        </div>
+        <div class="kpi">
+          <div class="label" id="inflLabel">Inflation vs baseline (USD)</div>
+          <div class="val" id="infl">—</div>
+        </div>
+      </div>
+      <div class="note">
+        Inflation vs baseline compares the latest basket index in USD to your first recorded snapshot.
+        A positive percentage means the latest basket costs more than the baseline and will be in red (inflation exists).
+        A negative percentage means the latest basket costs less than the baseline and will be in green (deflation exists).
+      </div>
+
+      <div style="height:12px"></div>
+      <div class="chartBox tall">
+        <canvas id="basketChart"></canvas>
+      </div>
+    </div>
+
+    <div class="row view-controls">
+      <span class="filter-label">Commodity view</span>
+      <div class="toggle-group" id="commodityToggle" role="group" aria-label="Commodity view toggle"></div>
+    </div>
+
     <div class="grid">
-      <div class="card">
+      <div class="card" style="grid-column: 1 / -1;">
         <h3>Items (click one)</h3>
         <div class="items" id="items"></div>
         <div class="note" id="itemsNote"></div>
-      </div>
-
-      <div class="card">
-        <h3>Basket inflation</h3>
-        <div class="kpis">
-          <div class="kpi">
-            <div class="label">BTC/USD</div>
-            <div class="val" id="btcUsd">—</div>
-          </div>
-          <div class="kpi">
-            <div class="label" id="basketIndexLabel">Basket Index</div>
-            <div class="val" id="basketIndex">—</div>
-          </div>
-          <div class="kpi">
-            <div class="label" id="inflLabel">Inflation vs baseline</div>
-            <div class="val" id="infl">—</div>
-          </div>
-        </div>
-        <div class="note">
-          Inflation vs baseline compares the latest basket index in the selected commodity units to your first recorded snapshot.
-          A positive percentage means the latest basket costs more than the baseline and will be in red (inflation exists).
-          A negative percentage means the latest basket costs less than the baseline and will be in green (deflation exists).
-        </div>
-
-        <div style="height:12px"></div>
-        <div class="chartBox tall">
-          <canvas id="basketChart"></canvas>
-        </div>
       </div>
 
       <div class="card" style="grid-column: 1 / -1;">
@@ -411,6 +415,9 @@
   let fetchProgressHideTimer = null;
   let fetchProgressStart = null;
   let fetchProgressAvgMs = 12000;
+  let viewProgressTimer = null;
+  let viewProgressHideTimer = null;
+  let viewProgressStart = null;
 
   const FETCH_AVG_KEY = "btc_dashboard_fetch_avg_ms";
   const FETCH_MIN_MS = 2000;
@@ -503,6 +510,8 @@
 
     if (fetchProgressTimer) clearInterval(fetchProgressTimer);
     if (fetchProgressHideTimer) clearTimeout(fetchProgressHideTimer);
+    if (viewProgressTimer) clearInterval(viewProgressTimer);
+    if (viewProgressHideTimer) clearTimeout(viewProgressHideTimer);
 
     fetchProgressStart = Date.now();
     fetchProgressAvgMs = getAvgFetchMs();
@@ -549,6 +558,50 @@
       wrap.classList.remove("active");
       bar.style.width = "0%";
     }, 1200);
+  }
+
+  function startViewProgress(message){
+    const wrap = $("fetchProgress");
+    const bar = $("fetchProgressBar");
+    const meta = $("fetchProgressMeta");
+    if (!wrap || !bar || !meta) return;
+
+    if (fetchProgressTimer) clearInterval(fetchProgressTimer);
+    if (fetchProgressHideTimer) clearTimeout(fetchProgressHideTimer);
+    if (viewProgressTimer) clearInterval(viewProgressTimer);
+    if (viewProgressHideTimer) clearTimeout(viewProgressHideTimer);
+
+    wrap.classList.add("active");
+    bar.style.width = "8%";
+    meta.innerHTML = message || "Loading view…";
+    viewProgressStart = Date.now();
+
+    const tick = () => {
+      const elapsed = Date.now() - viewProgressStart;
+      const pct = Math.min(8 + (elapsed / 1200) * 80, 92);
+      bar.style.width = `${pct.toFixed(1)}%`;
+    };
+
+    tick();
+    viewProgressTimer = setInterval(tick, 120);
+  }
+
+  function stopViewProgress(message){
+    const wrap = $("fetchProgress");
+    const bar = $("fetchProgressBar");
+    const meta = $("fetchProgressMeta");
+    if (!wrap || !bar || !meta) return;
+
+    if (viewProgressTimer) clearInterval(viewProgressTimer);
+    viewProgressTimer = null;
+    if (viewProgressHideTimer) clearTimeout(viewProgressHideTimer);
+
+    meta.innerHTML = message || "View loaded.";
+    bar.style.width = "100%";
+    viewProgressHideTimer = setTimeout(() => {
+      wrap.classList.remove("active");
+      bar.style.width = "0%";
+    }, 800);
   }
 
   function clearItemCharts(){
@@ -611,8 +664,6 @@
     const titleEl = $("pageTitle");
     if (titleEl) titleEl.textContent = title;
     document.title = title;
-    $("basketIndexLabel").textContent = `Basket Index (${cfg.unitLabel})`;
-    $("inflLabel").textContent = `Inflation vs baseline (${cfg.unitLabel})`;
     $("historyCommodityLabel").textContent = `${cfg.label} (${cfg.unitLabel})`;
   }
 
@@ -633,6 +684,7 @@
 
   async function setCommodityMode(mode){
     if (commodityMode === mode) return;
+    startViewProgress("Loading view…");
     commodityMode = mode;
     renderCommodityToggle();
     updateCommodityTitle();
@@ -640,6 +692,7 @@
     renderItems();
     await renderItemHistory();
     await renderBasket();
+    stopViewProgress("View loaded.");
   }
 
   function getLatestCommodityUsd(type){
@@ -760,9 +813,13 @@
 
     cfg.items.forEach(it => {
       const row = latest?.items?.find(x => x.id === it.id);
-      const usd = row?.usd;
-      const sats = row?.sats;
-      const stale = Boolean(row?.is_stale);
+      const isCashTen = it.id === "cash10";
+      const latestTs = row?.ts || latest?.ts;
+      const cashUsd = 10;
+      const cashSats = isFinite(latest?.btcUsd) ? (cashUsd / latest.btcUsd) * 100000000 : NaN;
+      const usd = isCashTen ? cashUsd : row?.usd;
+      const sats = isCashTen ? cashSats : row?.sats;
+      const stale = isCashTen ? false : Boolean(row?.is_stale);
       const source = row?.price_source || "";
       const vendor = row?.price_vendor || "";
       const description = row?.item_description || it.name;
@@ -780,12 +837,12 @@
       const vendorCount = Number.isFinite(row?.vendor_count) ? row.vendor_count : 0;
       const usdClass = priceCompareClass(usd, first?.usd);
       const satsClass = priceCompareClass(sats, first?.sats);
-      const isUnverified = !stale && !hasSourceUrl(row);
-      const latestTs = row?.ts ? fmtDateTime(row.ts) : (latest?.ts ? fmtDateTime(latest.ts) : "—");
-      const commodityValue = getCommodityValue(usd, sats, row?.ts || latest?.ts);
+      const isUnverified = !stale && !hasSourceUrl(row) && !isCashTen;
+      const latestTsLabel = latestTs ? fmtDateTime(latestTs) : "—";
+      const commodityValue = getCommodityValue(usd, sats, latestTs);
       const commodityClass = priceCompareClass(commodityValue, firstCommodityValue);
-      const latestGoldValue = getCommodityValueForMode("gold", usd, sats, row?.ts || latest?.ts);
-      const latestSilverValue = getCommodityValueForMode("silver", usd, sats, row?.ts || latest?.ts);
+      const latestGoldValue = getCommodityValueForMode("gold", usd, sats, latestTs);
+      const latestSilverValue = getCommodityValueForMode("silver", usd, sats, latestTs);
       const latestGoldClass = commodityMode === "gold" ? priceCompareClass(latestGoldValue, firstGoldValue) : "";
       const latestSilverClass = commodityMode === "silver" ? priceCompareClass(latestSilverValue, firstSilverValue) : "";
       const latestGold = fmtCommodityForMode(latestGoldValue, "gold");
@@ -809,7 +866,7 @@
             <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span> /
             <span class="${latestGoldClass}">Gold: ${latestGold}</span> /
             <span class="${latestSilverClass}">Silver: ${latestSilver}</span>
-            <span>as of ${escapeHtml(latestTs)}</span>
+            <span>as of ${escapeHtml(latestTsLabel)}</span>
           </span>
         </div>
         <div class="first-available">
@@ -836,7 +893,7 @@
   async function selectItem(itemId){
     activeItemId = itemId;
     renderItems();
-    await renderItemHistory();
+    await renderItemHistoryWithProgress();
   }
 
   async function loadConfig(){
@@ -864,7 +921,7 @@
       updateCommodityTitle();
       await ensureCommodityReferences();
       renderItems();
-      await renderItemHistory();
+      await renderItemHistoryWithProgress();
       await renderBasket();
 
       if (latest?.ts) {
@@ -897,7 +954,7 @@
       await ensureCommodityReferences();
       renderItems();
 
-      await renderItemHistory();
+      await renderItemHistoryWithProgress();
       await renderBasket();
 
       const anyStale = (latest.items || []).some(x => x.is_stale);
@@ -926,7 +983,7 @@
 
       setStatus("Recorded <b>" + res.rowsAppended + "</b> rows at <b>" + new Date(res.recordedAt).toLocaleString() + "</b>");
       await renderBasket();
-      await renderItemHistory();
+      await renderItemHistoryWithProgress();
 
     } catch (err) {
       setStatus("<b style='color:#fb7185'>Record failed:</b> " + escapeHtml(String(err)));
@@ -1157,27 +1214,34 @@
     }
   }
 
+  async function renderItemHistoryWithProgress(){
+    startViewProgress("Loading item view…");
+    try {
+      await renderItemHistory();
+    } finally {
+      stopViewProgress("Item view loaded.");
+    }
+  }
+
   async function renderBasket(){
     const hist = await new Promise((resolve, reject) => {
       google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getBasketHistory();
     });
 
     referenceHistory.basket = hist;
-    const cfg = getCommodityConfig();
-    const series = hist.map(point => {
-      const usd = Number(point.basketIndexUsd);
-      const sats = Number(point.basketIndexSats);
-      return getCommodityValue(usd, sats, point.ts);
-    });
+
+    await ensureCommodityReferences(true);
+
     const labels = hist.map(point => new Date(point.ts).toLocaleString());
-    const first = series.find(val => isFinite(val));
-    const last = [...series].reverse().find(val => isFinite(val));
+    const usdSeries = hist.map(point => Number(point.basketIndexUsd));
+    const first = usdSeries.find(val => isFinite(val));
+    const last = [...usdSeries].reverse().find(val => isFinite(val));
     const inflationPct = (isFinite(first) && isFinite(last) && first !== 0)
       ? ((last / first) - 1) * 100
       : 0;
     const inflCls = inflationPct >= 0 ? "bad" : "good";
     $("infl").innerHTML = `<span class="${inflCls}">${inflationPct.toFixed(2)}%</span>`;
-    $("basketIndex").textContent = fmtCommodity(last);
+    $("basketIndex").textContent = fmtUsd(last);
 
     const commodityColors = {
       grocery: "#fbbf24",
@@ -1186,7 +1250,26 @@
       gold: "#f59e0b",
       silver: "#94a3b8"
     };
-    const lineColor = commodityColors[cfg.id] || "#7dd3fc";
+    const datasets = COMMODITIES.map(mode => {
+      const color = commodityColors[mode.id] || "#7dd3fc";
+      const series = hist.map(point => {
+        const usd = Number(point.basketIndexUsd);
+        const sats = Number(point.basketIndexSats);
+        return getCommodityValueForMode(mode.id, usd, sats, point.ts);
+      });
+      return {
+        label: `Basket (${mode.label})`,
+        data: series,
+        borderColor: color,
+        backgroundColor: hexToRgba(color, 0.18),
+        pointBackgroundColor: color,
+        pointBorderColor: color,
+        borderWidth: 2,
+        tension: 0.25,
+        pointRadius: 2,
+        spanGaps: true
+      };
+    });
 
     basketChart = destroyChartSafe(basketChart);
 
@@ -1195,18 +1278,7 @@
       type: "line",
       data: {
         labels,
-        datasets: [{
-          label: `Basket Index (${cfg.unitLabel})`,
-          data: series,
-          borderColor: lineColor,
-          backgroundColor: hexToRgba(lineColor, 0.18),
-          pointBackgroundColor: lineColor,
-          pointBorderColor: lineColor,
-          borderWidth: 2,
-          tension: 0.25,
-          pointRadius: 2,
-          spanGaps: true
-        }]
+        datasets
       },
       options: {
         responsive: true,
@@ -1215,11 +1287,11 @@
         plugins: { legend: { display: true } },
         scales: {
           x: {
-            title: { display: true, text: "Date/time" },
+            title: { display: true, text: "Time" },
             ticks: { maxTicksLimit: 6 }
           },
           y: {
-            title: { display: true, text: `Basket value (${cfg.unitLabel})` },
+            title: { display: true, text: "Price" },
             beginAtZero: false
           }
         }
@@ -1240,7 +1312,7 @@
   $("btnFetch").addEventListener("click", fetchLatest);
   $("btnRecord").addEventListener("click", recordSnapshot);
   $("btnBasket").addEventListener("click", renderBasket);
-  $("itemViewMode").addEventListener("change", renderItemHistory);
+  $("itemViewMode").addEventListener("change", renderItemHistoryWithProgress);
   $("btnAdminToggle").addEventListener("click", toggleAdminControls);
 
   (async () => {
