@@ -172,6 +172,17 @@
       color:var(--muted);
       font-weight:700;
     }
+    .chart-section{
+      margin-bottom:16px;
+    }
+    .chart-title{
+      margin:0 0 8px;
+      font-size:12px;
+      color:var(--muted);
+      font-weight:800;
+      letter-spacing:.35px;
+      text-transform:uppercase;
+    }
   </style>
 </head>
 
@@ -240,9 +251,7 @@
         </div>
 
         <div style="height:12px"></div>
-        <div class="chartBox">
-          <canvas id="itemChart"></canvas>
-        </div>
+        <div id="itemCharts"></div>
 
         <div class="note" id="itemNote"></div>
       </div>
@@ -255,7 +264,7 @@
   let activeItemId = null;
   let itemViewMode = "selected";
 
-  let itemChart = null;
+  let itemCharts = [];
   let basketChart = null;
 
   const $ = (id) => document.getElementById(id);
@@ -287,6 +296,13 @@
   function destroyChartSafe(ch){
     if (ch && typeof ch.destroy === "function") ch.destroy();
     return null;
+  }
+
+  function clearItemCharts(){
+    itemCharts.forEach(ch => destroyChartSafe(ch));
+    itemCharts = [];
+    const root = $("itemCharts");
+    if (root) root.innerHTML = "";
   }
 
   function escapeHtml(s){
@@ -347,9 +363,9 @@
       div.innerHTML = `
         <div class="name">${escapeHtml(description)} ${badge}</div>
         <div class="meta">
-          <span class="${usdClass}">${usd != null ? fmtUsd(usd) : "—"}</span>
-          <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span>
-          ${sourceUrl ? `<a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source</a>` : ""}
+          <span class="${usdClass}">Current: ${usd != null ? fmtUsd(usd) : "—"}</span>
+          <span class="${satsClass}">Current: ${sats != null ? fmtSats(sats) : "—"}</span>
+          ${sourceUrl ? `<a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Sources</a>` : ""}
         </div>
         <div class="first-available">
           <span>Earliest: ${firstUsd} / ${firstSats} on ${firstDate}</span>
@@ -451,94 +467,30 @@
     }
   }
 
-  async function renderItemHistory(){
-    if (!activeItemId) return;
-
-    itemViewMode = $("itemViewMode")?.value || "selected";
-
-    if (itemViewMode === "all") {
-      const descriptions = (latest?.items?.length ? latest.items : cfg.items).map(item => (
-        item?.item_description || item?.name || ""
-      )).filter(Boolean);
-
-      const allHistories = await new Promise((resolve, reject) => {
-        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getAllItemHistories(descriptions);
-      });
-
-      const palette = [
-        "#7dd3fc", "#c4b5fd", "#34d399", "#fbbf24", "#fb7185",
-        "#a5b4fc", "#f472b6", "#93c5fd", "#86efac", "#fca5a5"
-      ];
-
-      const timestamps = new Set();
-      allHistories.forEach(item => {
-        (item.history || []).forEach(point => timestamps.add(point.ts));
-      });
-
-      const sortedTs = Array.from(timestamps).sort((a, b) => new Date(a) - new Date(b));
-      const labels = sortedTs.map(ts => new Date(ts).toLocaleString());
-
-      const datasets = allHistories.map((item, idx) => {
-        const color = palette[idx % palette.length];
-        const map = new Map((item.history || []).map(point => [point.ts, Number(point.usd) * 1000]));
-        return {
-          label: item.description,
-          data: sortedTs.map(ts => map.has(ts) ? map.get(ts) : null),
-          borderColor: color,
-          backgroundColor: hexToRgba(color, 0.12),
-          pointBackgroundColor: color,
-          pointBorderColor: color,
-          borderWidth: 2,
-          tension: 0.25,
-          pointRadius: 2,
-          spanGaps: true
-        };
-      });
-
-      itemChart = destroyChartSafe(itemChart);
-      const ctx = $("itemChart").getContext("2d");
-      itemChart = new Chart(ctx, {
-        type: "line",
-        data: { labels, datasets },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          plugins: { legend: { display: true } },
-          scales: {
-            x: { ticks: { maxTicksLimit: 6 } },
-            y: { title: { display: true, text: "USD (x1000)" } }
-          }
-        }
-      });
-
-      $("itemTitle").textContent = "All item history";
-      $("itemNote").textContent = "Showing USD (x1000) history for all items.";
-      return;
+  function createChartSection(titleText, showTitle){
+    const section = document.createElement("div");
+    section.className = "chart-section";
+    if (showTitle) {
+      const title = document.createElement("div");
+      title.className = "chart-title";
+      title.textContent = titleText;
+      section.appendChild(title);
     }
+    const box = document.createElement("div");
+    box.className = "chartBox";
+    const canvas = document.createElement("canvas");
+    box.appendChild(canvas);
+    section.appendChild(box);
+    $("itemCharts").appendChild(section);
+    return canvas;
+  }
 
-    const item = cfg.items.find(x => x.id === activeItemId);
-    const latestRow = latest?.items?.find(x => x.id === activeItemId);
-    const description = latestRow?.item_description || item?.name || "Item history";
-
-    const hist = await new Promise((resolve, reject) => {
-      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getItemHistory(description);
-    });
-
-    const staleCount = hist.filter(x => x.is_stale).length;
-
-    $("itemTitle").textContent = description;
-    $("itemNote").innerHTML =
-      (staleCount ? ("<span class='warn'>" + staleCount + " stale points</span>") : "");
-
+  function buildItemChart(canvas, hist){
     const labels = hist.map(p => new Date(p.ts).toLocaleString());
     const usdSeries = hist.map(p => Number(p.usd) * 1000);
     const satsSeries = hist.map(p => Number(p.sats));
 
-    itemChart = destroyChartSafe(itemChart);
-
-    const ctx = $("itemChart").getContext("2d");
-    itemChart = new Chart(ctx, {
+    const chart = new Chart(canvas.getContext("2d"), {
       type: "line",
       data: {
         labels,
@@ -580,6 +532,115 @@
         }
       }
     });
+    itemCharts.push(chart);
+  }
+
+  function buildAllItemsChart(allHistories){
+    const palette = [
+      "#7dd3fc", "#c4b5fd", "#34d399", "#fbbf24", "#fb7185",
+      "#a5b4fc", "#f472b6", "#93c5fd", "#86efac", "#fca5a5"
+    ];
+
+    const timestamps = new Set();
+    allHistories.forEach(item => {
+      (item.history || []).forEach(point => timestamps.add(point.ts));
+    });
+
+    const sortedTs = Array.from(timestamps).sort((a, b) => new Date(a) - new Date(b));
+    const labels = sortedTs.map(ts => new Date(ts).toLocaleString());
+
+    const datasets = allHistories.map((item, idx) => {
+      const color = palette[idx % palette.length];
+      const map = new Map((item.history || []).map(point => [point.ts, Number(point.usd) * 1000]));
+      return {
+        label: item.description,
+        data: sortedTs.map(ts => map.has(ts) ? map.get(ts) : null),
+        borderColor: color,
+        backgroundColor: hexToRgba(color, 0.12),
+        pointBackgroundColor: color,
+        pointBorderColor: color,
+        borderWidth: 2,
+        tension: 0.25,
+        pointRadius: 2,
+        spanGaps: true
+      };
+    });
+
+    const canvas = createChartSection("All item history", true);
+    const chart = new Chart(canvas.getContext("2d"), {
+      type: "line",
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: { legend: { display: true } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 6 } },
+          y: { title: { display: true, text: "USD (x1000)" } }
+        }
+      }
+    });
+    itemCharts.push(chart);
+  }
+
+  async function renderItemHistory(){
+    if (!activeItemId) return;
+
+    itemViewMode = $("itemViewMode")?.value || "selected";
+    clearItemCharts();
+
+    if (itemViewMode === "all") {
+      const selectedItem = cfg.items.find(x => x.id === activeItemId);
+      const orderedItems = [
+        selectedItem,
+        ...cfg.items.filter(x => x.id !== activeItemId)
+      ].filter(Boolean);
+
+      const descriptions = orderedItems.map(item => {
+        const latestRow = latest?.items?.find(x => x.id === item.id);
+        return latestRow?.item_description || item?.name || "";
+      }).filter(Boolean);
+
+      const allHistories = await new Promise((resolve, reject) => {
+        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getAllItemHistories(descriptions);
+      });
+
+      const historyMap = new Map(allHistories.map(item => [item.description, item.history || []]));
+
+      let staleCount = 0;
+      descriptions.forEach(description => {
+        const hist = historyMap.get(description) || [];
+        staleCount += hist.filter(x => x.is_stale).length;
+        const canvas = createChartSection(description, true);
+        buildItemChart(canvas, hist);
+      });
+
+      buildAllItemsChart(allHistories);
+
+      $("itemTitle").textContent = "All item history";
+      $("itemNote").innerHTML = staleCount
+        ? `<span class='warn'>${staleCount} stale points</span>`
+        : "Selected item first, then all other items, with the combined chart at the bottom.";
+      return;
+    }
+
+    const item = cfg.items.find(x => x.id === activeItemId);
+    const latestRow = latest?.items?.find(x => x.id === activeItemId);
+    const description = latestRow?.item_description || item?.name || "Item history";
+
+    const hist = await new Promise((resolve, reject) => {
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getItemHistory(description);
+    });
+
+    const staleCount = hist.filter(x => x.is_stale).length;
+
+    $("itemTitle").textContent = description;
+    $("itemNote").innerHTML =
+      (staleCount ? ("<span class='warn'>" + staleCount + " stale points</span>") : "");
+
+    const canvas = createChartSection("", false);
+    buildItemChart(canvas, hist);
   }
 
   async function renderBasket(){
