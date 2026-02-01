@@ -318,6 +318,7 @@
       <div class="card">
         <h3>Items (click one)</h3>
         <div class="items" id="items"></div>
+        <div class="note" id="itemsNote"></div>
       </div>
 
       <div class="card">
@@ -416,7 +417,7 @@
   const COMMODITIES = [
     { id: "grocery", label: "Grocery Items", unitLabel: "grocery items", unitShort: "items", precision: 2 },
     { id: "sats", label: "Satoshis", unitLabel: "10,000 sats", unitShort: "x10k sats", precision: 2 },
-    { id: "dollars", label: "Dollars", unitLabel: "$10", unitShort: "x$10", precision: 2 },
+    { id: "dollars", label: "Dollars", unitLabel: "$", unitShort: "$", precision: 2 },
     { id: "gold", label: "Gold", unitLabel: "1 gram gold", unitShort: "g gold", precision: 4 },
     { id: "silver", label: "Silver", unitLabel: "1 gram silver", unitShort: "g silver", precision: 4 }
   ];
@@ -436,11 +437,13 @@
   function fmtCommodity(n){
     if (!isFinite(n)) return "—";
     const cfg = getCommodityConfig();
+    if (cfg.id === "dollars") return fmtUsd(n);
     return n.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
   }
   function fmtCommodityForMode(n, mode){
     if (!isFinite(n)) return "—";
     const cfg = getCommodityConfigById(mode);
+    if (cfg.id === "dollars") return fmtUsd(n);
     return n.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
   }
   function fmtDate(d){
@@ -675,7 +678,7 @@
       case "sats":
         return isFinite(sats) ? (sats / 10000) : NaN;
       case "dollars":
-        return isFinite(usd) ? (usd / 10) : NaN;
+        return isFinite(usd) ? usd : NaN;
       case "gold": {
         const ref = getReferenceUsd("gold", ts);
         return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) : NaN;
@@ -757,18 +760,26 @@
       const first = row?.first_available;
       const firstDate = fmtDate(first?.ts);
       const firstCommodity = first ? fmtCommodity(getCommodityValue(first.usd, first.sats, first.ts)) : "—";
+      const firstCommodityValue = first ? getCommodityValue(first.usd, first.sats, first.ts) : NaN;
       const firstUsd = first?.usd != null ? fmtUsd(first.usd) : "—";
       const firstSats = first?.sats != null ? fmtSats(first.sats) : "—";
-      const firstGold = first ? fmtCommodityForMode(getCommodityValueForMode("gold", first.usd, first.sats, first.ts), "gold") : "—";
-      const firstSilver = first ? fmtCommodityForMode(getCommodityValueForMode("silver", first.usd, first.sats, first.ts), "silver") : "—";
+      const firstGoldValue = first ? getCommodityValueForMode("gold", first.usd, first.sats, first.ts) : NaN;
+      const firstSilverValue = first ? getCommodityValueForMode("silver", first.usd, first.sats, first.ts) : NaN;
+      const firstGold = first ? fmtCommodityForMode(firstGoldValue, "gold") : "—";
+      const firstSilver = first ? fmtCommodityForMode(firstSilverValue, "silver") : "—";
       const vendorCount = Number.isFinite(row?.vendor_count) ? row.vendor_count : 0;
       const usdClass = priceCompareClass(usd, first?.usd);
       const satsClass = priceCompareClass(sats, first?.sats);
       const isUnverified = !stale && !hasSourceUrl(row);
       const latestTs = row?.ts ? fmtDateTime(row.ts) : (latest?.ts ? fmtDateTime(latest.ts) : "—");
       const commodityValue = getCommodityValue(usd, sats, row?.ts || latest?.ts);
-      const latestGold = fmtCommodityForMode(getCommodityValueForMode("gold", usd, sats, row?.ts || latest?.ts), "gold");
-      const latestSilver = fmtCommodityForMode(getCommodityValueForMode("silver", usd, sats, row?.ts || latest?.ts), "silver");
+      const commodityClass = priceCompareClass(commodityValue, firstCommodityValue);
+      const latestGoldValue = getCommodityValueForMode("gold", usd, sats, row?.ts || latest?.ts);
+      const latestSilverValue = getCommodityValueForMode("silver", usd, sats, row?.ts || latest?.ts);
+      const latestGoldClass = commodityMode === "gold" ? priceCompareClass(latestGoldValue, firstGoldValue) : "";
+      const latestSilverClass = commodityMode === "silver" ? priceCompareClass(latestSilverValue, firstSilverValue) : "";
+      const latestGold = fmtCommodityForMode(latestGoldValue, "gold");
+      const latestSilver = fmtCommodityForMode(latestSilverValue, "silver");
 
       const div = document.createElement("div");
       div.className = "item" + (it.id === activeItemId ? " active" : "");
@@ -783,11 +794,11 @@
         <div class="name">${escapeHtml(description)} ${badge}</div>
         <div class="meta">
           <span>
-            Latest: <span>${fmtCommodity(commodityValue)}</span> •
+            Latest: <span class="${commodityClass}">${fmtCommodity(commodityValue)}</span> •
             <span class="${usdClass}">${usd != null ? fmtUsd(usd) : "—"}</span> /
             <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span> /
-            <span>${latestGold}</span> /
-            <span>${latestSilver}</span>
+            <span class="${latestGoldClass}">Gold: ${latestGold}</span> /
+            <span class="${latestSilverClass}">Silver: ${latestSilver}</span>
             <span>as of ${escapeHtml(latestTs)}</span>
           </span>
         </div>
@@ -801,6 +812,15 @@
       `;
       root.appendChild(div);
     });
+
+    const itemsNote = $("itemsNote");
+    if (itemsNote) {
+      if (commodityMode === "grocery") {
+        itemsNote.textContent = "Grocery items view shows each item's USD price divided by the latest basket baseline (average of all items). Example: 0.17 items means the item costs 17% of the baseline basket, and 0.008 items means under 1% of the basket.";
+      } else {
+        itemsNote.textContent = "";
+      }
+    }
   }
 
   async function selectItem(itemId){
@@ -1153,7 +1173,7 @@
       getCommodityValueForMode("grocery", latestUsd, latestSats, latestPoint?.ts)
     ];
     const basketLabels = [
-      "Basket Index ($10)",
+      "Basket Index ($)",
       "Basket Index (g gold)",
       "Basket Index (g silver)",
       "Basket Index (10 groceries)"
