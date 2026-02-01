@@ -291,12 +291,6 @@
       <div class="card">
         <h3>Items (click one)</h3>
         <div class="items" id="items"></div>
-        <div class="note">
-          “Fetch Latest” updates the UI (cached 10 min). “Record Snapshot” writes permanent history.
-          If the provider is down, the app may show <span class="warn">stale</span> last-known prices.
-          Prices without a provider URL are marked <span class="warn">unverified</span> so you can tell when a source link is missing.
-          If cache/stale fallback is disabled, unverified rows will show no source link instead of fallback values.
-        </div>
       </div>
 
       <div class="card">
@@ -316,9 +310,9 @@
           </div>
         </div>
         <div class="note">
-          Inflation vs baseline compares the latest basket index (USD) to your first recorded snapshot.
-          Inflation vs baseline (sats) compares the latest basket index in sats to the first snapshot.
-          Positive means the basket costs more than the baseline.
+          Inflation vs baseline compares the latest basket index (USD or sats) to your first recorded snapshot.
+          A positive percentage means the latest basket costs more than the baseline and will be in red (inflation exists).
+          A negative percentage means the latest basket costs less than the baseline and will be in green (deflation exists).
         </div>
 
         <div style="height:12px"></div>
