@@ -56,6 +56,19 @@
       font-weight: 700;
     }
     .btn:disabled{ opacity:.6; cursor:not-allowed; }
+    .btn.secondary{
+      background: rgba(0,0,0,0.2);
+      border: 1px solid rgba(255,255,255,0.25);
+    }
+    .admin-controls{
+      display:none;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+    .admin-controls.is-visible{
+      display:flex;
+    }
 
     select{
       background: rgba(0,0,0,0.22);
@@ -265,9 +278,12 @@
         </div>
       </div>
       <div class="row">
-        <button class="btn" id="btnFetch">Fetch Latest</button>
-        <button class="btn" id="btnRecord">Record Snapshot</button>
-        <button class="btn" id="btnBasket">Refresh Basket</button>
+        <button class="btn secondary" id="btnAdminToggle" aria-expanded="false">Admin Only - Click Here</button>
+        <div class="admin-controls" id="adminControls" aria-hidden="true">
+          <button class="btn" id="btnFetch">Fetch Latest</button>
+          <button class="btn" id="btnRecord">Record Snapshot</button>
+          <button class="btn" id="btnBasket">Refresh Basket</button>
+        </div>
       </div>
     </div>
 
@@ -927,10 +943,21 @@
     });
   }
 
+  function toggleAdminControls(){
+    const controls = $("adminControls");
+    const toggle = $("btnAdminToggle");
+    if (!controls || !toggle) return;
+    const isVisible = controls.classList.toggle("is-visible");
+    controls.setAttribute("aria-hidden", String(!isVisible));
+    toggle.setAttribute("aria-expanded", String(isVisible));
+    toggle.textContent = isVisible ? "Admin Only - Hide Buttons" : "Admin Only - Click Here";
+  }
+
   $("btnFetch").addEventListener("click", fetchLatest);
   $("btnRecord").addEventListener("click", recordSnapshot);
   $("btnBasket").addEventListener("click", renderBasket);
   $("itemViewMode").addEventListener("change", renderItemHistory);
+  $("btnAdminToggle").addEventListener("click", toggleAdminControls);
 
   (async () => {
     try {
