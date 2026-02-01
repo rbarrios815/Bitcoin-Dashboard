@@ -403,8 +403,7 @@
 
     $("itemTitle").textContent = description;
     $("itemNote").innerHTML =
-      (description ? ("Description: <b>" + escapeHtml(description) + "</b>") : "") +
-      (staleCount ? (" — <span class='warn'>" + staleCount + " stale points</span>") : "");
+      (staleCount ? ("<span class='warn'>" + staleCount + " stale points</span>") : "");
 
     const labels = hist.map(p => new Date(p.ts).toLocaleString());
     const usdSeries = hist.map(p => Number(p.usd) * 1000);

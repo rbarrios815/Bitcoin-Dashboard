@@ -816,10 +816,18 @@ function parseItems_(itemList) {
       const query = parts[2] || parts[0];
       items.push({ id, name, query });
     } else {
-      items.push({ id: slug_(token), name: title_(token), query: token });
+      items.push({ id: slug_(token), name: title_(token), query: defaultQueryForItem_(token) });
     }
   });
   return items;
+}
+
+function defaultQueryForItem_(itemName) {
+  const normalized = String(itemName || '').trim().toLowerCase();
+  const overrides = {
+    'ground beef': 'ground beef 80/20 1 lb'
+  };
+  return overrides[normalized] || itemName;
 }
 
 function getSerpQuery_(rawQuery, context) {
