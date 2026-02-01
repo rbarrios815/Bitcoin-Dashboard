@@ -1161,6 +1161,7 @@
       const sats = Number(point.basketIndexSats);
       return getCommodityValue(usd, sats, point.ts);
     });
+    const labels = hist.map(point => new Date(point.ts).toLocaleString());
     const first = series.find(val => isFinite(val));
     const last = [...series].reverse().find(val => isFinite(val));
     const inflationPct = (isFinite(first) && isFinite(last) && first !== 0)
@@ -1170,57 +1171,49 @@
     $("infl").innerHTML = `<span class="${inflCls}">${inflationPct.toFixed(2)}%</span>`;
     $("basketIndex").textContent = fmtCommodity(last);
 
-    const latestPoint = hist[hist.length - 1];
-    const latestUsd = Number(latestPoint?.basketIndexUsd);
-    const latestSats = Number(latestPoint?.basketIndexSats);
-    const basketValues = [
-      getCommodityValueForMode("dollars", latestUsd, latestSats, latestPoint?.ts),
-      getCommodityValueForMode("gold", latestUsd, latestSats, latestPoint?.ts),
-      getCommodityValueForMode("silver", latestUsd, latestSats, latestPoint?.ts),
-      getCommodityValueForMode("grocery", latestUsd, latestSats, latestPoint?.ts)
-    ];
-    const basketLabels = [
-      "Basket Index ($)",
-      "Basket Index (g gold)",
-      "Basket Index (g silver)",
-      "Basket Index (10 groceries)"
-    ];
+    const commodityColors = {
+      grocery: "#fbbf24",
+      sats: "#a5b4fc",
+      dollars: "#7dd3fc",
+      gold: "#f59e0b",
+      silver: "#94a3b8"
+    };
+    const lineColor = commodityColors[cfg.id] || "#7dd3fc";
 
     basketChart = destroyChartSafe(basketChart);
 
     const ctx = $("basketChart").getContext("2d");
     basketChart = new Chart(ctx, {
-      type: "bar",
+      type: "line",
       data: {
-        labels: basketLabels,
-        datasets: [
-          {
-            label: "Basket Index (latest)",
-            data: basketValues,
-            borderWidth: 1,
-            backgroundColor: [
-              "rgba(125,211,252,0.55)",
-              "rgba(196,181,253,0.55)",
-              "rgba(52,211,153,0.55)",
-              "rgba(251,191,36,0.55)"
-            ],
-            borderColor: [
-              "rgba(125,211,252,0.95)",
-              "rgba(196,181,253,0.95)",
-              "rgba(52,211,153,0.95)",
-              "rgba(251,191,36,0.95)"
-            ]
-          }
-        ]
+        labels,
+        datasets: [{
+          label: `Basket Index (${cfg.unitLabel})`,
+          data: series,
+          borderColor: lineColor,
+          backgroundColor: hexToRgba(lineColor, 0.18),
+          pointBackgroundColor: lineColor,
+          pointBorderColor: lineColor,
+          borderWidth: 2,
+          tension: 0.25,
+          pointRadius: 2,
+          spanGaps: true
+        }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         animation: false,
-        plugins: { legend: { display: false } },
+        plugins: { legend: { display: true } },
         scales: {
-          x: { ticks: { maxTicksLimit: 8 } },
-          y: { beginAtZero: true }
+          x: {
+            title: { display: true, text: "Date/time" },
+            ticks: { maxTicksLimit: 6 }
+          },
+          y: {
+            title: { display: true, text: `Basket value (${cfg.unitLabel})` },
+            beginAtZero: false
+          }
         }
       }
     });
