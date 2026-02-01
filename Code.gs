@@ -261,6 +261,12 @@ function getLatestSnapshotFromSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(props.dataSheetName);
   const items = parseItems_(props.itemList);
+  const nameCounts = items.reduce((acc, item) => {
+    const name = String(item.name || '').trim();
+    if (!name) return acc;
+    acc[name] = (acc[name] || 0) + 1;
+    return acc;
+  }, {});
 
   if (!sheet || sheet.getLastRow() < 2) {
     return {
@@ -312,6 +318,8 @@ function getLatestSnapshotFromSheet() {
     const rowItemName = idx.item_name != null ? String(row[idx.item_name] || '').trim() : '';
     const rowDetails = {
       ts,
+      item_id: rowItemId,
+      item_name: rowItemName,
       item_description: desc,
       usd: Number(row[idx.usd]),
       sats: Number(row[idx.sats]),
@@ -361,8 +369,18 @@ function getLatestSnapshotFromSheet() {
   const payloadItems = items.map(it => {
     const fallbackDescription = applyItemDescription_(it.name, null, null);
     const normalized = normalizeDescription_(fallbackDescription);
-    const latestRow = latestById[it.id] || latestByName[it.name] || latestByDescription[normalized] || null;
-    const earliestRow = earliestById[it.id] || earliestByName[it.name] || earliestByDescription[normalized] || null;
+    const nameKey = String(it.name || '').trim();
+    const isNameUnique = nameKey && nameCounts[nameKey] === 1;
+    const latestNameRow = latestByName[nameKey];
+    const earliestNameRow = earliestByName[nameKey];
+    const latestRow = latestById[it.id]
+      || (isNameUnique ? latestNameRow : null)
+      || latestByDescription[normalized]
+      || null;
+    const earliestRow = earliestById[it.id]
+      || (isNameUnique ? earliestNameRow : null)
+      || earliestByDescription[normalized]
+      || null;
     const description = latestRow?.item_description || fallbackDescription;
     return {
       id: it.id,
