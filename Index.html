@@ -423,7 +423,7 @@
       const usdClass = priceCompareClass(usd, first?.usd);
       const satsClass = priceCompareClass(sats, first?.sats);
       const isUnverified = !stale && !hasSourceUrl(row);
-      const latestTs = latest?.ts ? fmtDateTime(latest.ts) : "—";
+      const latestTs = row?.ts ? fmtDateTime(row.ts) : (latest?.ts ? fmtDateTime(latest.ts) : "—");
 
       const div = document.createElement("div");
       div.className = "item" + (it.id === activeItemId ? " active" : "");

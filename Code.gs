@@ -94,6 +94,7 @@ function fetchLatestSnapshot() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(props.dataSheetName);
 
+  const snapshotTs = new Date().toISOString();
   const btcUsd = fetchBtcUsd_(props);
   const items = parseItems_(props.itemList);
 
@@ -124,6 +125,7 @@ function fetchLatestSnapshot() {
         name: it.name,
         query: it.query,
         item_description: description,
+        ts: snapshotTs,
         usd: rr.usd,
         sats: sats,
         source_url: rr.source_url || '',
@@ -142,6 +144,7 @@ function fetchLatestSnapshot() {
         name: it.name,
         query: it.query,
         item_description: description,
+        ts: snapshotTs,
         usd: sr.usd,
         sats: sats,
         source_url: sr.source_url || '',
@@ -161,6 +164,7 @@ function fetchLatestSnapshot() {
           name: it.name,
           query: it.query,
           item_description: description,
+          ts: snapshotTs,
           usd: last,
           sats: sats,
           source_url: '',
@@ -176,6 +180,7 @@ function fetchLatestSnapshot() {
       name: it.name,
       query: it.query,
       item_description: applyItemDescription_(it.name, null, null),
+      ts: snapshotTs,
       usd: 0,
       sats: 0,
       source_url: '',
@@ -203,7 +208,7 @@ function fetchLatestSnapshot() {
   const basketSats = average_(priced.map(p => p.sats));
 
   const out = {
-    ts: new Date().toISOString(),
+    ts: snapshotTs,
     btcUsd,
     items: enriched,
     basketIndexUsd: basketUsd,
@@ -410,6 +415,7 @@ function getLatestSnapshotFromSheet() {
       name: it.name,
       query: it.query,
       item_description: description,
+      ts: latestRow ? new Date(latestRow.ts).toISOString() : null,
       usd: latestRow ? latestRow.usd : 0,
       sats: latestRow ? latestRow.sats : 0,
       source_url: latestRow ? latestRow.source_url : '',
