@@ -117,7 +117,7 @@ function fetchLatestSnapshot() {
     const rr = rapid.byId[it.id];
 
     if (rr && isFinite(rr.usd) && rr.usd > 0) {
-      const description = rr.description || getItemDescription_(it.name, null);
+      const description = applyItemDescription_(it.name, rr.description, null);
       const sats = usdToSats_(rr.usd, btcUsd);
       return {
         id: it.id,
@@ -126,6 +126,7 @@ function fetchLatestSnapshot() {
         item_description: description,
         usd: rr.usd,
         sats: sats,
+        source_url: rr.source_url || '',
         price_source: rr.source,
         is_stale: false
       };
@@ -133,7 +134,7 @@ function fetchLatestSnapshot() {
 
     const sr = serpById[it.id];
     if (sr && isFinite(sr.usd) && sr.usd > 0) {
-      const description = sr.description || getItemDescription_(it.name, null);
+      const description = applyItemDescription_(it.name, sr.description, null);
       const sats = usdToSats_(sr.usd, btcUsd);
       return {
         id: it.id,
@@ -142,6 +143,7 @@ function fetchLatestSnapshot() {
         item_description: description,
         usd: sr.usd,
         sats: sats,
+        source_url: sr.source_url || '',
         price_source: sr.source,
         is_stale: false
       };
@@ -151,7 +153,7 @@ function fetchLatestSnapshot() {
       const last = getLastKnownUsd_(it.id, sheet);
       if (isFinite(last) && last > 0) {
         const sats = usdToSats_(last, btcUsd);
-        const description = getItemDescription_(it.name, null);
+        const description = applyItemDescription_(it.name, null, null);
         return {
           id: it.id,
           name: it.name,
@@ -159,6 +161,7 @@ function fetchLatestSnapshot() {
           item_description: description,
           usd: last,
           sats: sats,
+          source_url: '',
           price_source: 'last_known',
           is_stale: true
         };
@@ -169,9 +172,10 @@ function fetchLatestSnapshot() {
       id: it.id,
       name: it.name,
       query: it.query,
-      item_description: getItemDescription_(it.name, null),
+      item_description: applyItemDescription_(it.name, null, null),
       usd: 0,
       sats: 0,
+      source_url: '',
       price_source: (rr && rr.error) ? ('error:' + rr.error) : 'error',
       is_stale: true
     };
@@ -346,7 +350,12 @@ function fetchItemsUsdRapidApiBatch_(items, props) {
         cachedData = null;
       }
       if (cachedData && isFinite(cachedData.usd)) {
-        byId[it.id] = { usd: Number(cachedData.usd), description: cachedData.description || '', source: 'cache' };
+        byId[it.id] = {
+          usd: Number(cachedData.usd),
+          description: cachedData.description || '',
+          source_url: cachedData.source_url || '',
+          source: 'cache'
+        };
       } else {
         byId[it.id] = { usd: Number(cached), source: 'cache' };
       }
@@ -395,11 +404,12 @@ function fetchItemsUsdRapidApiBatch_(items, props) {
       const data = JSON.parse(text);
       const price = extractLowestPrice_(data, props.maxResultsPerItem);
       const extractedDescription = extractItemDescription_(data, props.maxResultsPerItem);
-      const description = extractedDescription || getItemDescription_(it.name, null);
+      const extractedSourceUrl = extractItemSourceUrl_(data, props.maxResultsPerItem);
+      const description = applyItemDescription_(it.name, extractedDescription, null);
 
       if (isFinite(price) && price > 0) {
-        cache.put(key, JSON.stringify({ usd: price, description: description }), ttl);
-        byId[it.id] = { usd: price, description: description, source: 'rapidapi' };
+        cache.put(key, JSON.stringify({ usd: price, description: description, source_url: extractedSourceUrl }), ttl);
+        byId[it.id] = { usd: price, description: description, source_url: extractedSourceUrl, source: 'rapidapi' };
       } else {
         byId[it.id] = { error: 'rapidapi_no_price', source: 'rapidapi' };
       }
@@ -494,11 +504,12 @@ function fetchItemsUsdSerpApiBatch_(items, props) {
 
       const price = Math.min.apply(null, candidates);
       const serpResultForDescription = getSerpResultForDescription_(results);
-      const description = getItemDescription_(it.name, serpResultForDescription);
+      const description = applyItemDescription_(it.name, null, serpResultForDescription);
+      const sourceUrl = extractSerpSourceUrl_(results);
       if (isFinite(price) && price > 0) {
         const key = cacheKeyForQuery_(it.query);
-        cache.put(key, JSON.stringify({ usd: price, description: description }), ttl);
-        byId[it.id] = { usd: price, description: description, source: 'serpapi' };
+        cache.put(key, JSON.stringify({ usd: price, description: description, source_url: sourceUrl }), ttl);
+        byId[it.id] = { usd: price, description: description, source_url: sourceUrl, source: 'serpapi' };
       } else {
         byId[it.id] = { error: 'serpapi_bad_price', source: 'serpapi' };
       }
@@ -861,6 +872,30 @@ function extractItemDescription_(data, maxInspect) {
   return '';
 }
 
+function extractItemSourceUrl_(data, maxInspect) {
+  const arr = (Array.isArray(data) && data) ||
+    (Array.isArray(data.products) && data.products) ||
+    (Array.isArray(data.results) && data.results) ||
+    (Array.isArray(data.items) && data.items) ||
+    [];
+  const fields = [
+    'product_url', 'productUrl', 'url', 'product_link', 'productLink', 'link',
+    'detail_url', 'detailUrl', 'item_url', 'itemUrl', 'product_page_url',
+    'product_page_link', 'source_url', 'sourceUrl'
+  ];
+
+  for (let i = 0; i < Math.min(arr.length, maxInspect); i++) {
+    const item = arr[i] || {};
+    for (let f = 0; f < fields.length; f++) {
+      const value = item[fields[f]];
+      if (typeof value !== 'string') continue;
+      const trimmed = value.trim();
+      if (trimmed && /^https?:\/\//i.test(trimmed)) return trimmed;
+    }
+  }
+  return '';
+}
+
 function getSerpResultForDescription_(results) {
   if (!Array.isArray(results)) return null;
   for (let i = 0; i < results.length; i++) {
@@ -868,6 +903,21 @@ function getSerpResultForDescription_(results) {
     if (res && res.snippet) return res;
   }
   return results.length ? results[0] : null;
+}
+
+function extractSerpSourceUrl_(results) {
+  if (!Array.isArray(results)) return '';
+  const fields = ['link', 'product_link', 'productLink', 'url', 'product_url', 'productUrl'];
+  for (let i = 0; i < results.length; i++) {
+    const res = results[i] || {};
+    for (let f = 0; f < fields.length; f++) {
+      const value = res[fields[f]];
+      if (typeof value !== 'string') continue;
+      const trimmed = value.trim();
+      if (trimmed && /^https?:\/\//i.test(trimmed)) return trimmed;
+    }
+  }
+  return '';
 }
 
 function getItemDescription_(itemName, serpResult) {
@@ -879,6 +929,7 @@ function getItemDescription_(itemName, serpResult) {
   const normalized = String(itemName || '').trim().toLowerCase();
   const descriptionOverrides = {
     apples: 'Honeycrisp apples 3 lb bag',
+    bananas: '1 Banana',
     eggs: 'Grade A large eggs 12 count',
     milk: 'Whole milk 1 gallon',
     butter: 'Unsalted butter 16 oz',
@@ -917,4 +968,11 @@ function getItemDescription_(itemName, serpResult) {
       return fallback || 'Grocery item.';
     }
   }
+}
+
+function applyItemDescription_(itemName, candidate, serpResult) {
+  const normalized = String(itemName || '').trim().toLowerCase();
+  if (normalized === 'bananas' || normalized === 'banana') return '1 Banana';
+  if (candidate) return candidate;
+  return getItemDescription_(itemName, serpResult);
 }
