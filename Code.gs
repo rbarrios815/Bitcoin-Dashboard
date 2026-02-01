@@ -97,14 +97,15 @@ function fetchLatestSnapshot() {
   const snapshotTs = new Date().toISOString();
   const btcUsd = fetchBtcUsd_(props);
   const items = parseItems_(props.itemList);
+  const fetchableItems = items.filter(item => item.id !== 'cash10');
 
   // 1) RapidAPI batch fetch (includes per-item cache reads/writes)
-  const rapid = fetchItemsUsdRapidApiBatch_(items, props);
+  const rapid = fetchItemsUsdRapidApiBatch_(fetchableItems, props);
 
   // 2) SerpAPI batch fetch only for RapidAPI failures (if configured)
   let serpById = {};
   if (props.serpApiKey) {
-    const needSerp = items.filter(it => {
+    const needSerp = fetchableItems.filter(it => {
       const rr = rapid.byId[it.id];
       return !rr || rr.error;
     });
@@ -115,6 +116,22 @@ function fetchLatestSnapshot() {
 
   // 3) Finalize items with fallback to last-known
   const priced = items.map(it => {
+    if (it.id === 'cash10') {
+      const usd = 10;
+      return {
+        id: it.id,
+        name: it.name,
+        query: it.query,
+        item_description: applyItemDescription_(it.name, null, null),
+        ts: snapshotTs,
+        usd: usd,
+        sats: usdToSats_(usd, btcUsd),
+        source_url: '',
+        price_source: 'fixed',
+        price_vendor: '',
+        is_stale: false
+      };
+    }
     const rr = rapid.byId[it.id];
 
     if (rr && isFinite(rr.usd) && rr.usd > 0) {
@@ -1160,6 +1177,7 @@ function ensureCommodityItems_(items) {
   };
   addCommodity('gold', 'Gold');
   addCommodity('silver', 'Silver');
+  addCommodity('cash10', '$10');
 }
 
 function defaultQueryForItem_(itemName) {
