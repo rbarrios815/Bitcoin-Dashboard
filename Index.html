@@ -161,11 +161,16 @@
     .first-available{
       margin-top:6px;
       font-size:12px;
-      color: var(--bad);
+      color: var(--muted);
       font-weight:800;
       display:flex;
       flex-direction:column;
       gap:2px;
+    }
+    .filter-label{
+      font-size:12px;
+      color:var(--muted);
+      font-weight:700;
     }
   </style>
 </head>
@@ -225,6 +230,13 @@
       <div class="card" style="grid-column: 1 / -1;">
         <div class="row" style="justify-content:space-between;">
           <h3 style="margin:0;" id="itemTitle">Item history</h3>
+          <div class="row">
+            <span class="filter-label">Show</span>
+            <select id="itemViewMode">
+              <option value="selected">Selected only</option>
+              <option value="all">All items</option>
+            </select>
+          </div>
         </div>
 
         <div style="height:12px"></div>
@@ -241,6 +253,7 @@
   let cfg = null;
   let latest = null;
   let activeItemId = null;
+  let itemViewMode = "selected";
 
   let itemChart = null;
   let basketChart = null;
@@ -283,6 +296,16 @@
       .replaceAll(">","&gt;")
       .replaceAll('"',"&quot;")
       .replaceAll("'","&#039;");
+  }
+
+  function hexToRgba(hex, alpha){
+    const clean = String(hex || "").replace("#", "");
+    if (clean.length !== 6) return `rgba(255,255,255,${alpha})`;
+    const num = parseInt(clean, 16);
+    const r = (num >> 16) & 255;
+    const g = (num >> 8) & 255;
+    const b = num & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
   function getSourceUrl(row, item, description){
@@ -429,6 +452,69 @@
   async function renderItemHistory(){
     if (!activeItemId) return;
 
+    itemViewMode = $("itemViewMode")?.value || "selected";
+
+    if (itemViewMode === "all") {
+      const descriptions = (latest?.items?.length ? latest.items : cfg.items).map(item => (
+        item?.item_description || item?.name || ""
+      )).filter(Boolean);
+
+      const allHistories = await new Promise((resolve, reject) => {
+        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getAllItemHistories(descriptions);
+      });
+
+      const palette = [
+        "#7dd3fc", "#c4b5fd", "#34d399", "#fbbf24", "#fb7185",
+        "#a5b4fc", "#f472b6", "#93c5fd", "#86efac", "#fca5a5"
+      ];
+
+      const timestamps = new Set();
+      allHistories.forEach(item => {
+        (item.history || []).forEach(point => timestamps.add(point.ts));
+      });
+
+      const sortedTs = Array.from(timestamps).sort((a, b) => new Date(a) - new Date(b));
+      const labels = sortedTs.map(ts => new Date(ts).toLocaleString());
+
+      const datasets = allHistories.map((item, idx) => {
+        const color = palette[idx % palette.length];
+        const map = new Map((item.history || []).map(point => [point.ts, Number(point.usd) * 1000]));
+        return {
+          label: item.description,
+          data: sortedTs.map(ts => map.has(ts) ? map.get(ts) : null),
+          borderColor: color,
+          backgroundColor: hexToRgba(color, 0.12),
+          pointBackgroundColor: color,
+          pointBorderColor: color,
+          borderWidth: 2,
+          tension: 0.25,
+          pointRadius: 2,
+          spanGaps: true
+        };
+      });
+
+      itemChart = destroyChartSafe(itemChart);
+      const ctx = $("itemChart").getContext("2d");
+      itemChart = new Chart(ctx, {
+        type: "line",
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: { legend: { display: true } },
+          scales: {
+            x: { ticks: { maxTicksLimit: 6 } },
+            y: { title: { display: true, text: "USD (x1000)" } }
+          }
+        }
+      });
+
+      $("itemTitle").textContent = "All item history";
+      $("itemNote").textContent = "Showing USD (x1000) history for all items.";
+      return;
+    }
+
     const item = cfg.items.find(x => x.id === activeItemId);
     const latestRow = latest?.items?.find(x => x.id === activeItemId);
     const description = latestRow?.item_description || item?.name || "Item history";
@@ -505,8 +591,8 @@
 
     const usdPct = Number(infl.inflationPctUsd ?? infl.inflationPct ?? 0);
     const satsPct = Number(infl.inflationPctSats ?? 0);
-    const usdCls = usdPct >= 0 ? "good" : "bad";
-    const satsCls = satsPct >= 0 ? "good" : "bad";
+    const usdCls = usdPct >= 0 ? "bad" : "good";
+    const satsCls = satsPct >= 0 ? "bad" : "good";
     $("infl").innerHTML = `<span class="${usdCls}">${usdPct.toFixed(2)}%</span>`;
     $("inflSats").innerHTML = `<span class="${satsCls}">${satsPct.toFixed(2)}%</span>`;
 
@@ -539,6 +625,7 @@
   $("btnFetch").addEventListener("click", fetchLatest);
   $("btnRecord").addEventListener("click", recordSnapshot);
   $("btnBasket").addEventListener("click", renderBasket);
+  $("itemViewMode").addEventListener("change", renderItemHistory);
 
   (async () => {
     try {
