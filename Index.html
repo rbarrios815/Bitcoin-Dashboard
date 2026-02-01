@@ -440,12 +440,20 @@
     if (!isFinite(n)) return "—";
     const cfg = getCommodityConfig();
     if (cfg.id === "dollars") return fmtUsd(n);
+    if (cfg.id === "grocery") {
+      const pct = n * 100;
+      return pct.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + "% of basket";
+    }
     return n.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
   }
   function fmtCommodityForMode(n, mode){
     if (!isFinite(n)) return "—";
     const cfg = getCommodityConfigById(mode);
     if (cfg.id === "dollars") return fmtUsd(n);
+    if (cfg.id === "grocery") {
+      const pct = n * 100;
+      return pct.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + "% of basket";
+    }
     return n.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
   }
   function fmtDate(d){
@@ -818,7 +826,7 @@
     const itemsNote = $("itemsNote");
     if (itemsNote) {
       if (commodityMode === "grocery") {
-        itemsNote.textContent = "Grocery items view shows each item's USD price divided by the latest basket baseline (average of all items). Example: 0.17 items means the item costs 17% of the baseline basket, and 0.008 items means under 1% of the basket.";
+        itemsNote.textContent = "Grocery items view shows each item's USD price divided by the latest basket baseline (average of all items). Values are displayed as percent of the baseline basket (e.g., 17% of basket).";
       } else {
         itemsNote.textContent = "";
       }
