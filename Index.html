@@ -201,16 +201,17 @@
       <div class="card" style="grid-column: 1 / -1;">
         <div class="row" style="justify-content:space-between;">
           <h3 style="margin:0;">Selected item history</h3>
+          <div class="row">
+            <select id="mode">
+              <option value="usd">USD</option>
+              <option value="sats">sats</option>
+            </select>
+          </div>
         </div>
 
         <div style="height:12px"></div>
         <div class="chartBox">
-          <canvas id="itemUsdChart"></canvas>
-        </div>
-
-        <div style="height:12px"></div>
-        <div class="chartBox">
-          <canvas id="itemSatsChart"></canvas>
+          <canvas id="itemChart"></canvas>
         </div>
 
         <div class="note" id="itemNote"></div>
@@ -223,8 +224,7 @@
   let latest = null;
   let activeItemId = null;
 
-  let itemUsdChart = null;
-  let itemSatsChart = null;
+  let itemChart = null;
   let basketChart = null;
 
   const $ = (id) => document.getElementById(id);
@@ -262,7 +262,6 @@
       const row = latest?.items?.find(x => x.id === it.id);
       const usd = row?.usd;
       const sats = row?.sats;
-      const description = row?.description;
       const stale = Boolean(row?.is_stale);
       const source = row?.price_source || "";
 
@@ -278,7 +277,6 @@
         <div class="meta">
           <span>${usd != null ? fmtUsd(usd) : "—"}</span>
           <span>${sats != null ? fmtSats(sats) : "—"}</span>
-          ${description ? `<span>Qty: ${escapeHtml(description)}</span>` : ""}
         </div>
       `;
       root.appendChild(div);
@@ -350,57 +348,32 @@
   async function renderItemHistory(){
     if (!activeItemId) return;
 
+    const mode = $("mode").value;
+
     const hist = await new Promise((resolve, reject) => {
       google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getItemHistory(activeItemId);
     });
 
     const item = cfg.items.find(x => x.id === activeItemId);
-    const latestRow = latest?.items?.find(x => x.id === activeItemId);
     const staleCount = hist.filter(x => x.is_stale).length;
-    const description = latestRow?.description || hist.slice().reverse().find(x => x.description)?.description || "";
 
     $("itemNote").innerHTML =
       (item ? ("Query: <b>" + escapeHtml(item.query) + "</b>") : "") +
-      (description ? (" — Quantity: <b>" + escapeHtml(description) + "</b>") : "") +
       (staleCount ? (" — <span class='warn'>" + staleCount + " stale points</span>") : "");
 
     const labels = hist.map(p => new Date(p.ts).toLocaleString());
-    const usdSeries = hist.map(p => p.usd);
-    const satsSeries = hist.map(p => p.sats);
+    const series = hist.map(p => mode === "usd" ? p.usd : p.sats);
 
-    itemUsdChart = destroyChartSafe(itemUsdChart);
-    itemSatsChart = destroyChartSafe(itemSatsChart);
+    itemChart = destroyChartSafe(itemChart);
 
-    const usdCtx = $("itemUsdChart").getContext("2d");
-    itemUsdChart = new Chart(usdCtx, {
+    const ctx = $("itemChart").getContext("2d");
+    itemChart = new Chart(ctx, {
       type: "line",
       data: {
         labels,
         datasets: [{
-          label: "Price (USD)",
-          data: usdSeries,
-          borderWidth: 2,
-          tension: 0.25,
-          pointRadius: 2
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        plugins: { legend: { display: true } },
-        scales: { x: { ticks: { maxTicksLimit: 6 } } }
-      }
-    });
-
-    const satsCtx = $("itemSatsChart").getContext("2d");
-    itemSatsChart = new Chart(satsCtx, {
-      type: "line",
-      data: {
-        labels,
-        datasets: [{
-          label: "Price (sats)",
-          data: satsSeries,
+          label: mode === "usd" ? "Price (USD)" : "Price (sats)",
+          data: series,
           borderWidth: 2,
           tension: 0.25,
           pointRadius: 2
@@ -455,6 +428,7 @@
     });
   }
 
+  $("mode").addEventListener("change", renderItemHistory);
   $("btnFetch").addEventListener("click", fetchLatest);
   $("btnRecord").addEventListener("click", recordSnapshot);
   $("btnBasket").addEventListener("click", renderBasket);
