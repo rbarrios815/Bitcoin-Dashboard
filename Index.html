@@ -205,10 +205,15 @@
             <div class="label">Inflation vs baseline</div>
             <div class="val" id="infl">—</div>
           </div>
+          <div class="kpi">
+            <div class="label">Inflation vs baseline (sats)</div>
+            <div class="val" id="inflSats">—</div>
+          </div>
         </div>
         <div class="note">
           Inflation vs baseline compares the latest basket index (USD) to your first recorded snapshot.
-          Positive means the basket costs more in USD than the baseline.
+          Inflation vs baseline (sats) compares the latest basket index in sats to the first snapshot.
+          Positive means the basket costs more than the baseline.
         </div>
 
         <div style="height:12px"></div>
@@ -461,9 +466,12 @@
       google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getBasketInflation();
     });
 
-    const pct = Number(infl.inflationPct || 0);
-    const cls = pct >= 0 ? "bad" : "good";
-    $("infl").innerHTML = `<span class="${cls}">${pct.toFixed(2)}%</span>`;
+    const usdPct = Number(infl.inflationPctUsd ?? infl.inflationPct ?? 0);
+    const satsPct = Number(infl.inflationPctSats ?? 0);
+    const usdCls = usdPct >= 0 ? "good" : "bad";
+    const satsCls = satsPct >= 0 ? "good" : "bad";
+    $("infl").innerHTML = `<span class="${usdCls}">${usdPct.toFixed(2)}%</span>`;
+    $("inflSats").innerHTML = `<span class="${satsCls}">${satsPct.toFixed(2)}%</span>`;
 
     const labels = hist.map(p => new Date(p.ts).toLocaleDateString());
     const usd = hist.map(p => Number(p.basketIndexUsd) * 1000);
