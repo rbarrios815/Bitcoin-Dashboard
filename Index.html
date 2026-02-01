@@ -363,8 +363,8 @@
       div.innerHTML = `
         <div class="name">${escapeHtml(description)} ${badge}</div>
         <div class="meta">
-          <span class="${usdClass}">Current: ${usd != null ? fmtUsd(usd) : "—"}</span>
-          <span class="${satsClass}">Current: ${sats != null ? fmtSats(sats) : "—"}</span>
+          <span class="${usdClass}">Latest: ${usd != null ? fmtUsd(usd) : "—"}</span>
+          <span class="${satsClass}">Latest: ${sats != null ? fmtSats(sats) : "—"}</span>
           ${sourceUrl ? `<a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Sources</a>` : ""}
         </div>
         <div class="first-available">
