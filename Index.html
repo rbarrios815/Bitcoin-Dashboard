@@ -333,6 +333,7 @@
       const firstDate = fmtDate(first?.ts);
       const firstUsd = first?.usd != null ? fmtUsd(first.usd) : "—";
       const firstSats = first?.sats != null ? fmtSats(first.sats) : "—";
+      const vendorCount = Number.isFinite(row?.vendor_count) ? row.vendor_count : 0;
       const usdClass = priceCompareClass(usd, first?.usd);
       const satsClass = priceCompareClass(sats, first?.sats);
 
@@ -352,6 +353,7 @@
         </div>
         <div class="first-available">
           <span>Earliest: ${firstUsd} / ${firstSats} on ${firstDate}</span>
+          <span>Vendors seen: ${vendorCount}</span>
         </div>
       `;
       root.appendChild(div);
