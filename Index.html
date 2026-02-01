@@ -380,8 +380,9 @@
                 <th id="historyCommodityLabel">Commodity</th>
                 <th>USD</th>
                 <th>Sats</th>
-                <th>Gold (g)</th>
+                <th>Gold (0.1g)</th>
                 <th>Silver (g)</th>
+                <th>MWh</th>
                 <th>Vendor</th>
                 <th>Provider</th>
                 <th>Source URL</th>
@@ -406,7 +407,8 @@
   let referenceHistory = {
     basket: [],
     gold: [],
-    silver: []
+    silver: [],
+    mwh: []
   };
 
   let itemCharts = [];
@@ -427,8 +429,9 @@
     { id: "grocery", label: "Grocery Items", unitLabel: "grocery items", unitShort: "items", precision: 2 },
     { id: "sats", label: "Satoshis", unitLabel: "10,000 sats", unitShort: "x10k sats", precision: 2 },
     { id: "dollars", label: "Dollars", unitLabel: "$", unitShort: "$", precision: 2 },
-    { id: "gold", label: "Gold", unitLabel: "1 gram gold", unitShort: "g gold", precision: 4 },
-    { id: "silver", label: "Silver", unitLabel: "1 gram silver", unitShort: "g silver", precision: 4 }
+    { id: "gold", label: "Gold", unitLabel: "0.1 gram gold", unitShort: "0.1g gold", precision: 4 },
+    { id: "silver", label: "Silver", unitLabel: "1 gram silver", unitShort: "g silver", precision: 4 },
+    { id: "mwh", label: "MWh", unitLabel: "1 MWh electricity", unitShort: "MWh", precision: 4 }
   ];
 
   const $ = (id) => document.getElementById(id);
@@ -724,6 +727,10 @@
       const value = findReferenceValue(referenceHistory.silver, ts, "usd");
       return isFinite(value) ? value : getLatestCommodityUsd("silver");
     }
+    if (type === "mwh") {
+      const value = findReferenceValue(referenceHistory.mwh, ts, "usd");
+      return isFinite(value) ? value : getLatestCommodityUsd("mwh");
+    }
     if (type === "grocery") {
       const value = findReferenceValue(referenceHistory.basket, ts, "basketIndexUsd");
       return isFinite(value) ? value : null;
@@ -750,6 +757,10 @@
         const ref = getReferenceUsd("silver", ts);
         return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) : NaN;
       }
+      case "mwh": {
+        const ref = getReferenceUsd("mwh", ts);
+        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) : NaN;
+      }
       case "grocery":
       default: {
         const ref = getReferenceUsd("grocery", ts);
@@ -768,17 +779,21 @@
     const descriptions = [];
     const goldDescription = getCommodityDescriptionByName("gold");
     const silverDescription = getCommodityDescriptionByName("silver");
+    const mwhDescription = getCommodityDescriptionByName("mwh");
     if (goldDescription) descriptions.push(goldDescription);
     if (silverDescription) descriptions.push(silverDescription);
+    if (mwhDescription) descriptions.push(mwhDescription);
 
     if (!descriptions.length) {
       referenceHistory.gold = [];
       referenceHistory.silver = [];
+      referenceHistory.mwh = [];
       return;
     }
 
     referenceHistory.gold = [];
     referenceHistory.silver = [];
+    referenceHistory.mwh = [];
     const histories = await new Promise((resolve, reject) => {
       google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getAllItemHistories(descriptions);
     });
@@ -791,6 +806,9 @@
       if (silverDescription && key === normalizeKey(silverDescription)) {
         referenceHistory.silver = entry.history || [];
       }
+      if (mwhDescription && key === normalizeKey(mwhDescription)) {
+        referenceHistory.mwh = entry.history || [];
+      }
     });
   }
 
@@ -800,8 +818,8 @@
         google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getBasketHistory();
       });
     }
-    if (includeMetals || commodityMode === "gold" || commodityMode === "silver") {
-      if (!referenceHistory.gold.length && !referenceHistory.silver.length) {
+    if (includeMetals || commodityMode === "gold" || commodityMode === "silver" || commodityMode === "mwh") {
+      if (!referenceHistory.gold.length && !referenceHistory.silver.length && !referenceHistory.mwh.length) {
         await loadCommodityHistories();
       }
     }
@@ -832,8 +850,10 @@
       const firstSats = first?.sats != null ? fmtSats(first.sats) : "—";
       const firstGoldValue = first ? getCommodityValueForMode("gold", first.usd, first.sats, first.ts) : NaN;
       const firstSilverValue = first ? getCommodityValueForMode("silver", first.usd, first.sats, first.ts) : NaN;
+      const firstMwhValue = first ? getCommodityValueForMode("mwh", first.usd, first.sats, first.ts) : NaN;
       const firstGold = first ? fmtCommodityForMode(firstGoldValue, "gold") : "—";
       const firstSilver = first ? fmtCommodityForMode(firstSilverValue, "silver") : "—";
+      const firstMwh = first ? fmtCommodityForMode(firstMwhValue, "mwh") : "—";
       const vendorCount = Number.isFinite(row?.vendor_count) ? row.vendor_count : 0;
       const usdClass = priceCompareClass(usd, first?.usd);
       const satsClass = priceCompareClass(sats, first?.sats);
@@ -843,10 +863,13 @@
       const commodityClass = priceCompareClass(commodityValue, firstCommodityValue);
       const latestGoldValue = getCommodityValueForMode("gold", usd, sats, latestTs);
       const latestSilverValue = getCommodityValueForMode("silver", usd, sats, latestTs);
+      const latestMwhValue = getCommodityValueForMode("mwh", usd, sats, latestTs);
       const latestGoldClass = commodityMode === "gold" ? priceCompareClass(latestGoldValue, firstGoldValue) : "";
       const latestSilverClass = commodityMode === "silver" ? priceCompareClass(latestSilverValue, firstSilverValue) : "";
+      const latestMwhClass = commodityMode === "mwh" ? priceCompareClass(latestMwhValue, firstMwhValue) : "";
       const latestGold = fmtCommodityForMode(latestGoldValue, "gold");
       const latestSilver = fmtCommodityForMode(latestSilverValue, "silver");
+      const latestMwh = fmtCommodityForMode(latestMwhValue, "mwh");
 
       const div = document.createElement("div");
       div.className = "item" + (it.id === activeItemId ? " active" : "");
@@ -865,12 +888,13 @@
             <span class="${usdClass}">${usd != null ? fmtUsd(usd) : "—"}</span> /
             <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span> /
             <span class="${latestGoldClass}">Gold: ${latestGold}</span> /
-            <span class="${latestSilverClass}">Silver: ${latestSilver}</span>
+            <span class="${latestSilverClass}">Silver: ${latestSilver}</span> /
+            <span class="${latestMwhClass}">MWh: ${latestMwh}</span>
             <span>as of ${escapeHtml(latestTsLabel)}</span>
           </span>
         </div>
         <div class="first-available">
-          <span>Earliest: ${firstCommodity} • ${firstUsd} / ${firstSats} / ${firstGold} / ${firstSilver} on ${firstDate}</span>
+          <span>Earliest: ${firstCommodity} • ${firstUsd} / ${firstSats} / ${firstGold} / ${firstSilver} / ${firstMwh} on ${firstDate}</span>
           <span>
             Vendors seen: ${vendorCount}
             ${sourceUrl ? `• <a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source URL</a>` : "• No source URL"}
@@ -1143,7 +1167,7 @@
         ? `<span class='warn'>${staleCount} stale points</span>`
         : "Selected item first, then all other items, with the combined chart at the bottom.";
       $("itemVendors").innerHTML = "<span class='badge'>Select a single item to see vendors</span>";
-      $("itemHistoryRows").innerHTML = "<tr><td colspan='10'>Select a single item to see detailed records.</td></tr>";
+      $("itemHistoryRows").innerHTML = "<tr><td colspan='11'>Select a single item to see detailed records.</td></tr>";
       return;
     }
 
@@ -1186,7 +1210,7 @@
 
     const rowsRoot = $("itemHistoryRows");
     if (!hist.length) {
-      rowsRoot.innerHTML = "<tr><td colspan='10'>No history rows yet.</td></tr>";
+      rowsRoot.innerHTML = "<tr><td colspan='11'>No history rows yet.</td></tr>";
     } else {
       const orderedHistory = [...hist].sort((a, b) => new Date(b.ts) - new Date(a.ts));
       rowsRoot.innerHTML = orderedHistory.map(point => {
@@ -1196,6 +1220,7 @@
         const commodityValue = getCommodityValue(Number(point.usd), Number(point.sats), point.ts);
         const goldValue = getCommodityValueForMode("gold", Number(point.usd), Number(point.sats), point.ts);
         const silverValue = getCommodityValueForMode("silver", Number(point.usd), Number(point.sats), point.ts);
+        const mwhValue = getCommodityValueForMode("mwh", Number(point.usd), Number(point.sats), point.ts);
         return `
           <tr>
             <td>${escapeHtml(fmtDateTime(point.ts))}</td>
@@ -1204,6 +1229,7 @@
             <td>${escapeHtml(fmtSats(point.sats))}</td>
             <td>${escapeHtml(fmtCommodityForMode(goldValue, "gold"))}</td>
             <td>${escapeHtml(fmtCommodityForMode(silverValue, "silver"))}</td>
+            <td>${escapeHtml(fmtCommodityForMode(mwhValue, "mwh"))}</td>
             <td>${escapeHtml(vendorLabel)}</td>
             <td>${escapeHtml(providerLabel)}</td>
             <td>${sourceUrl ? `<a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source</a>` : "—"}</td>
@@ -1248,7 +1274,8 @@
       sats: "#a5b4fc",
       dollars: "#7dd3fc",
       gold: "#f59e0b",
-      silver: "#94a3b8"
+      silver: "#94a3b8",
+      mwh: "#22d3ee"
     };
     const datasets = COMMODITIES.map(mode => {
       const color = commodityColors[mode.id] || "#7dd3fc";
