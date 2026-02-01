@@ -1266,12 +1266,7 @@ function extractSerpSourceUrl_(results) {
   return '';
 }
 
-function getItemDescription_(itemName, serpResult) {
-  if (serpResult && serpResult.snippet) {
-    const snippet = String(serpResult.snippet).trim();
-    if (snippet) return snippet;
-  }
-
+function getStandardItemDescription_(itemName) {
   const normalized = String(itemName || '').trim().toLowerCase();
   const descriptionOverrides = {
     apples: 'Honeycrisp apples 3 lb bag',
@@ -1287,6 +1282,19 @@ function getItemDescription_(itemName, serpResult) {
     'yellow onions': 'Yellow onions 3 lb bag'
   };
   if (descriptionOverrides[normalized]) return descriptionOverrides[normalized];
+  return '';
+}
+
+function getItemDescription_(itemName, serpResult) {
+  const standard = getStandardItemDescription_(itemName);
+  if (standard) return standard;
+
+  if (serpResult && serpResult.snippet) {
+    const snippet = String(serpResult.snippet).trim();
+    if (snippet) return snippet;
+  }
+
+  const normalized = String(itemName || '').trim().toLowerCase();
 
   switch (normalized) {
     case 'honeycrisp apples 3 lb bag':
@@ -1317,8 +1325,8 @@ function getItemDescription_(itemName, serpResult) {
 }
 
 function applyItemDescription_(itemName, candidate, serpResult) {
-  const normalized = String(itemName || '').trim().toLowerCase();
-  if (normalized === 'bananas' || normalized === 'banana') return '1 Banana';
+  const standard = getStandardItemDescription_(itemName);
+  if (standard) return standard;
   if (candidate) return candidate;
   return getItemDescription_(itemName, serpResult);
 }
