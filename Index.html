@@ -408,6 +408,7 @@
       const sats = row?.sats;
       const stale = Boolean(row?.is_stale);
       const source = row?.price_source || "";
+      const vendor = row?.price_vendor || "";
       const description = row?.item_description || it.name;
       const sourceUrl = getSourceUrl(row, it, description);
       const first = row?.first_available;
@@ -423,13 +424,13 @@
       div.onclick = () => selectItem(it.id);
 
       const badge = stale ? `<span class="badge stale">STALE</span>` :
+                   vendor ? `<span class="badge">${escapeHtml(vendor)}</span>` :
                    source ? `<span class="badge">${escapeHtml(source)}</span>` : "";
 
       div.innerHTML = `
         <div class="name">${escapeHtml(description)} ${badge}</div>
         <div class="meta">
-          <span class="${usdClass}">Latest: ${usd != null ? fmtUsd(usd) : "—"}</span>
-          <span class="${satsClass}">Latest: ${sats != null ? fmtSats(sats) : "—"}</span>
+          <span>Latest: <span class="${usdClass}">${usd != null ? fmtUsd(usd) : "—"}</span> / <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span></span>
           ${sourceUrl ? `<a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Sources</a>` : ""}
         </div>
         <div class="first-available">
@@ -711,8 +712,8 @@
 
     const vendorSet = new Set();
     hist.forEach(point => {
-      if (isValidVendor(point.price_source)) {
-        vendorSet.add(point.price_source);
+      if (isValidVendor(point.price_vendor)) {
+        vendorSet.add(point.price_vendor);
       }
     });
     const vendors = Array.from(vendorSet).sort();
@@ -730,7 +731,7 @@
       rowsRoot.innerHTML = "<tr><td colspan='5'>No history rows yet.</td></tr>";
     } else {
       rowsRoot.innerHTML = hist.map(point => {
-        const vendorLabel = isValidVendor(point.price_source) ? point.price_source : "—";
+        const vendorLabel = isValidVendor(point.price_vendor) ? point.price_vendor : "—";
         return `
           <tr>
             <td>${escapeHtml(fmtDateTime(point.ts))}</td>

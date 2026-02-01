@@ -128,6 +128,7 @@ function fetchLatestSnapshot() {
         sats: sats,
         source_url: rr.source_url || '',
         price_source: rr.source,
+        price_vendor: rr.vendor || '',
         is_stale: false
       };
     }
@@ -145,6 +146,7 @@ function fetchLatestSnapshot() {
         sats: sats,
         source_url: sr.source_url || '',
         price_source: sr.source,
+        price_vendor: sr.vendor || '',
         is_stale: false
       };
     }
@@ -163,6 +165,7 @@ function fetchLatestSnapshot() {
           sats: sats,
           source_url: '',
           price_source: 'last_known',
+          price_vendor: '',
           is_stale: true
         };
       }
@@ -177,6 +180,7 @@ function fetchLatestSnapshot() {
       sats: 0,
       source_url: '',
       price_source: (rr && rr.error) ? ('error:' + rr.error) : 'error',
+      price_vendor: '',
       is_stale: true
     };
   });
@@ -236,6 +240,7 @@ function recordSnapshot() {
     snap.basketIndexUsd,   // basket_index_usd
     snap.basketIndexSats,  // basket_index_sats
     it.price_source,       // price_source
+    it.price_vendor,       // price_vendor
     it.is_stale            // is_stale
   ]));
 
@@ -285,6 +290,7 @@ function getLatestSnapshotFromSheet() {
         sats: 0,
         source_url: '',
         price_source: '',
+        price_vendor: '',
         is_stale: true,
         first_available: null,
         vendor_count: 0
@@ -321,10 +327,11 @@ function getLatestSnapshotFromSheet() {
 
     const normalized = normalizeDescription_(desc);
     const rowPriceSource = idx.price_source != null ? String(row[idx.price_source] || '').trim() : '';
+    const rowPriceVendor = idx.price_vendor != null ? String(row[idx.price_vendor] || '').trim() : '';
     if (normalized) {
       if (!vendorCountsByDescription[normalized]) vendorCountsByDescription[normalized] = {};
-      if (rowPriceSource && rowPriceSource !== 'last_known' && rowPriceSource !== 'cache' && !/^error:/i.test(rowPriceSource)) {
-        vendorCountsByDescription[normalized][rowPriceSource] = true;
+      if (rowPriceVendor) {
+        vendorCountsByDescription[normalized][rowPriceVendor] = true;
       }
     }
     const rowItemId = idx.item_id != null ? String(row[idx.item_id] || '').trim() : '';
@@ -337,6 +344,7 @@ function getLatestSnapshotFromSheet() {
       usd: Number(row[idx.usd]),
       sats: Number(row[idx.sats]),
       price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
+      price_vendor: idx.price_vendor != null ? String(row[idx.price_vendor] || '') : '',
       is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false
     };
     if (!latestByDescription[normalized] || ts > latestByDescription[normalized].ts) {
@@ -404,6 +412,7 @@ function getLatestSnapshotFromSheet() {
       sats: latestRow ? latestRow.sats : 0,
       source_url: '',
       price_source: latestRow ? latestRow.price_source : '',
+      price_vendor: latestRow ? latestRow.price_vendor : '',
       is_stale: latestRow ? latestRow.is_stale : true,
       first_available: earliestRow
         ? { ts: new Date(earliestRow.ts).toISOString(), usd: earliestRow.usd, sats: earliestRow.sats }
@@ -449,6 +458,7 @@ function getItemHistory(itemDescription) {
       sats: Number(row[idx.sats]),
       btcUsd: Number(row[idx.btc_usd]),
       price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
+      price_vendor: idx.price_vendor != null ? String(row[idx.price_vendor] || '') : '',
       is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false
     });
   }
@@ -498,6 +508,7 @@ function getAllItemHistories(itemDescriptions) {
       sats: Number(row[idx.sats]),
       btcUsd: Number(row[idx.btc_usd]),
       price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
+      price_vendor: idx.price_vendor != null ? String(row[idx.price_vendor] || '') : '',
       is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false
     });
   }
@@ -601,6 +612,7 @@ function fetchItemsUsdRapidApiBatch_(items, props) {
           usd: Number(cachedData.usd),
           description: cachedData.description || '',
           source_url: cachedData.source_url || '',
+          vendor: cachedData.vendor || '',
           source: 'cache'
         };
       } else {
@@ -652,11 +664,27 @@ function fetchItemsUsdRapidApiBatch_(items, props) {
       const price = extractLowestPrice_(data, props.maxResultsPerItem);
       const extractedDescription = extractItemDescription_(data, props.maxResultsPerItem);
       const extractedSourceUrl = extractItemSourceUrl_(data, props.maxResultsPerItem);
+      const extractedVendor = extractItemVendor_(data, props.maxResultsPerItem, extractedSourceUrl);
       const description = applyItemDescription_(it.name, extractedDescription, null);
 
       if (isFinite(price) && price > 0) {
-        cache.put(key, JSON.stringify({ usd: price, description: description, source_url: extractedSourceUrl }), ttl);
-        byId[it.id] = { usd: price, description: description, source_url: extractedSourceUrl, source: 'rapidapi' };
+        cache.put(
+          key,
+          JSON.stringify({
+            usd: price,
+            description: description,
+            source_url: extractedSourceUrl,
+            vendor: extractedVendor
+          }),
+          ttl
+        );
+        byId[it.id] = {
+          usd: price,
+          description: description,
+          source_url: extractedSourceUrl,
+          vendor: extractedVendor,
+          source: 'rapidapi'
+        };
       } else {
         byId[it.id] = { error: 'rapidapi_no_price', source: 'rapidapi' };
       }
@@ -753,10 +781,20 @@ function fetchItemsUsdSerpApiBatch_(items, props) {
       const serpResultForDescription = getSerpResultForDescription_(results);
       const description = applyItemDescription_(it.name, null, serpResultForDescription);
       const sourceUrl = extractSerpSourceUrl_(results);
+      const vendor = extractSerpVendor_(results, sourceUrl);
       if (isFinite(price) && price > 0) {
         const key = cacheKeyForQuery_(it.query);
-        cache.put(key, JSON.stringify({ usd: price, description: description, source_url: sourceUrl }), ttl);
-        byId[it.id] = { usd: price, description: description, source_url: sourceUrl, source: 'serpapi' };
+        cache.put(
+          key,
+          JSON.stringify({
+            usd: price,
+            description: description,
+            source_url: sourceUrl,
+            vendor: vendor
+          }),
+          ttl
+        );
+        byId[it.id] = { usd: price, description: description, source_url: sourceUrl, vendor: vendor, source: 'serpapi' };
       } else {
         byId[it.id] = { error: 'serpapi_bad_price', source: 'serpapi' };
       }
@@ -864,7 +902,7 @@ function getVendorCountsByDescriptions_(descriptions, sheet) {
 
   const header = values[0];
   const idx = headerIndex_(header);
-  if (idx.price_source == null) return {};
+  if (idx.price_vendor == null) return {};
 
   const desired = {};
   descriptions.forEach(desc => {
@@ -880,12 +918,12 @@ function getVendorCountsByDescriptions_(descriptions, sheet) {
     if (!rowDescription) continue;
     const normalized = normalizeDescription_(rowDescription);
     if (!desired[normalized]) continue;
-    const rowPriceSource = String(row[idx.price_source] || '').trim();
-    if (!rowPriceSource || rowPriceSource === 'last_known' || rowPriceSource === 'cache' || /^error:/i.test(rowPriceSource)) {
+    const rowPriceVendor = String(row[idx.price_vendor] || '').trim();
+    if (!rowPriceVendor) {
       continue;
     }
     if (!out[normalized]) out[normalized] = {};
-    out[normalized][rowPriceSource] = true;
+    out[normalized][rowPriceVendor] = true;
   }
 
   const counts = {};
@@ -981,7 +1019,7 @@ function getOrCreateHistorySheet_(ss, name) {
 
   const desiredHeader = [
     'timestamp', 'btc_usd', 'item_id', 'item_name', 'query', 'item_description', 'usd', 'sats',
-    'basket_index_usd', 'basket_index_sats', 'price_source', 'is_stale'
+    'basket_index_usd', 'basket_index_sats', 'price_source', 'price_vendor', 'is_stale'
   ];
 
   if (sh.getLastRow() === 0) {
@@ -1028,6 +1066,7 @@ function headerIndex_(headerRow) {
     basket_index_usd: m.basket_index_usd,
     basket_index_sats: m.basket_index_sats,
     price_source: m.price_source !== undefined ? m.price_source : null,
+    price_vendor: m.price_vendor !== undefined ? m.price_vendor : null,
     is_stale: m.is_stale !== undefined ? m.is_stale : null
   };
 }
@@ -1242,6 +1281,50 @@ function extractItemSourceUrl_(data, maxInspect) {
   return '';
 }
 
+function extractItemVendor_(data, maxInspect, sourceUrl) {
+  const arr = (Array.isArray(data) && data) ||
+    (Array.isArray(data.products) && data.products) ||
+    (Array.isArray(data.results) && data.results) ||
+    (Array.isArray(data.items) && data.items) ||
+    [];
+  const fields = [
+    'source', 'seller', 'merchant', 'merchant_name', 'seller_name',
+    'store', 'store_name', 'shop', 'shop_name', 'retailer', 'retailer_name',
+    'vendor', 'vendor_name', 'marketplace', 'provider'
+  ];
+
+  for (let i = 0; i < Math.min(arr.length, maxInspect); i++) {
+    const item = arr[i] || {};
+    for (let f = 0; f < fields.length; f++) {
+      const value = item[fields[f]];
+      if (value == null) continue;
+      const text = String(value).trim();
+      if (text) return text;
+    }
+    if (Array.isArray(item.offers)) {
+      for (let o = 0; o < item.offers.length; o++) {
+        const offer = item.offers[o] || {};
+        for (let f = 0; f < fields.length; f++) {
+          const value = offer[fields[f]];
+          if (value == null) continue;
+          const text = String(value).trim();
+          if (text) return text;
+        }
+      }
+    }
+    if (item.offer && typeof item.offer === 'object') {
+      for (let f = 0; f < fields.length; f++) {
+        const value = item.offer[fields[f]];
+        if (value == null) continue;
+        const text = String(value).trim();
+        if (text) return text;
+      }
+    }
+  }
+
+  return vendorFromUrl_(sourceUrl);
+}
+
 function getSerpResultForDescription_(results) {
   if (!Array.isArray(results)) return null;
   for (let i = 0; i < results.length; i++) {
@@ -1264,6 +1347,34 @@ function extractSerpSourceUrl_(results) {
     }
   }
   return '';
+}
+
+function extractSerpVendor_(results, sourceUrl) {
+  if (Array.isArray(results)) {
+    const fields = ['source', 'seller', 'merchant', 'store', 'shop', 'retailer', 'vendor'];
+    for (let i = 0; i < results.length; i++) {
+      const res = results[i] || {};
+      for (let f = 0; f < fields.length; f++) {
+        const value = res[fields[f]];
+        if (value == null) continue;
+        const text = String(value).trim();
+        if (text) return text;
+      }
+    }
+  }
+  return vendorFromUrl_(sourceUrl);
+}
+
+function vendorFromUrl_(url) {
+  if (!url) return '';
+  const match = String(url).match(/^https?:\/\/([^/]+)/i);
+  if (!match) return '';
+  let host = match[1].toLowerCase();
+  host = host.replace(/^www\./, '');
+  if (!host) return '';
+  const parts = host.split('.');
+  if (parts.length <= 2) return host;
+  return parts.slice(-2).join('.');
 }
 
 function getStandardItemDescription_(itemName) {
