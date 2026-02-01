@@ -91,6 +91,7 @@ function fetchLatestSnapshot() {
       id: it.id,
       name: it.name,
       query: it.query,
+      description: got.description,
       usd: got.usd,
       sats: sats,
       price_source: got.source,
@@ -134,6 +135,7 @@ function recordSnapshot() {
     it.id,                     // item_id
     it.name,                   // item_name
     it.query,                  // query
+    it.description,            // item_description (NEW)
     it.usd,                    // usd
     it.sats,                   // sats
     snap.basketIndexUsd,       // basket_index_usd
@@ -176,6 +178,7 @@ function getItemHistory(itemId) {
       ts: new Date(row[idx.timestamp]).toISOString(),
       usd: Number(row[idx.usd]),
       sats: Number(row[idx.sats]),
+      description: idx.item_description != null ? String(row[idx.item_description] || '') : '',
       btcUsd: Number(row[idx.btc_usd]),
       price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
       is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false
@@ -254,7 +257,19 @@ function fetchItemUsd_(item, props, sheetForFallback) {
   const key = 'PC_ITEM_' + Utilities.base64EncodeWebSafe(item.query).slice(0, 50);
   const cached = cache.get(key);
   if (cached) {
-    return { usd: Number(cached), source: 'cache', stale: false };
+    try {
+      const parsed = JSON.parse(cached);
+      if (parsed && typeof parsed === 'object') {
+        return {
+          usd: Number(parsed.usd),
+          description: parsed.description || '',
+          source: 'cache',
+          stale: false
+        };
+      }
+    } catch (e) {}
+
+    return { usd: Number(cached), description: '', source: 'cache', stale: false };
   }
 
   let url = addParam_(props.priceApiSearchUrl, 'product_title', item.query);
@@ -288,10 +303,10 @@ function fetchItemUsd_(item, props, sheetForFallback) {
       }
 
       const data = JSON.parse(resp.getContentText());
-      const price = extractLowestPrice_(data, props.maxResultsPerItem);
+      const result = extractPriceAndDescription_(data, props.maxResultsPerItem);
 
-      cache.put(key, String(price), ttl);
-      return { usd: price, source: 'rapidapi', stale: false };
+      cache.put(key, JSON.stringify({ usd: result.price, description: result.description }), ttl);
+      return { usd: result.price, description: result.description, source: 'rapidapi', stale: false };
 
     } catch (e) {
       lastErr = e;
@@ -303,15 +318,16 @@ function fetchItemUsd_(item, props, sheetForFallback) {
   if (props.allowStaleFallback && sheetForFallback) {
     const last = getLastKnownUsd_(item.id, sheetForFallback);
     if (isFinite(last) && last > 0) {
-      return { usd: last, source: 'last_known', stale: true };
+      return { usd: last, description: '', source: 'last_known', stale: true };
     }
   }
 
   throw lastErr || new Error('Unknown price fetch failure');
 }
 
-function extractLowestPrice_(data, maxInspect) {
+function extractPriceAndDescription_(data, maxInspect) {
   const candidates = [];
+  let description = '';
   const arr =
     (Array.isArray(data) && data) ||
     (Array.isArray(data.products) && data.products) ||
@@ -334,6 +350,10 @@ function extractLowestPrice_(data, maxInspect) {
     [direct, offer, nested].forEach(v => {
       if (isFinite(v) && v > 0) candidates.push(v);
     });
+
+    if (!description) {
+      description = extractItemDescription_(p);
+    }
   }
 
   if (!candidates.length) {
@@ -343,7 +363,30 @@ function extractLowestPrice_(data, maxInspect) {
   }
 
   if (!candidates.length) throw new Error('Could not extract price from response');
-  return Math.min.apply(null, candidates);
+  return { price: Math.min.apply(null, candidates), description };
+}
+
+function extractItemDescription_(item) {
+  const candidates = [
+    item.quantity,
+    item.size,
+    item.weight,
+    item.volume,
+    item.unit_size,
+    item.unit_count,
+    item.units,
+    item.pack,
+    item.description
+  ];
+
+  for (let i = 0; i < candidates.length; i++) {
+    const value = candidates[i];
+    if (value != null && String(value).trim()) {
+      return String(value).trim();
+    }
+  }
+
+  return '';
 }
 
 /**
@@ -354,9 +397,9 @@ function getLastKnownUsd_(itemId, sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return null;
 
-  // A timestamp, B btc_usd, C item_id, F usd
+  // A timestamp, B btc_usd, C item_id, G usd
   const ITEM_ID_COL = 3;
-  const USD_COL = 6;
+  const USD_COL = 7;
 
   const chunkSize = 200;
   for (let end = lastRow; end >= 2; end -= chunkSize) {
@@ -450,6 +493,7 @@ function getOrCreateHistorySheet_(ss, name) {
     'item_id',
     'item_name',
     'query',
+    'item_description',
     'usd',
     'sats',
     'basket_index_usd',
@@ -502,6 +546,7 @@ function headerIndex_(headerRow) {
     item_id: m.item_id,
     item_name: m.item_name,
     query: m.query,
+    item_description: (m.item_description !== undefined ? m.item_description : null),
     usd: m.usd,
     sats: m.sats,
     basket_index_usd: m.basket_index_usd,
