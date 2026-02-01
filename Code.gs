@@ -423,7 +423,8 @@ function fetchItemsUsdSerpApiBatch_(items, props) {
   const byId = {};
 
   const requests = items.map(it => {
-    const query = encodeURIComponent(it.query);
+    const rawQuery = getSerpQuery_(it.query, `SerpAPI batch item "${it.id}"`);
+    const query = encodeURIComponent(rawQuery);
     let url = 'https://serpapi.com/search?engine=' + encodeURIComponent(engine) +
       '&q=' + query +
       '&api_key=' + encodeURIComponent(props.serpApiKey) +
@@ -432,7 +433,12 @@ function fetchItemsUsdSerpApiBatch_(items, props) {
     if (props.serpApiLocation) url += '&location=' + encodeURIComponent(props.serpApiLocation);
     if (String(props.serpApiNoCache).toLowerCase() === 'true') url += '&no_cache=true';
 
-    return { url, method: 'get', muteHttpExceptions: true };
+    return {
+      url,
+      method: 'get',
+      muteHttpExceptions: true,
+      serpQuery: rawQuery
+    };
   });
 
   const responses = UrlFetchApp.fetchAll(requests);
@@ -441,13 +447,14 @@ function fetchItemsUsdSerpApiBatch_(items, props) {
     const it = items[i];
     const resp = responses[i];
     const requestUrl = requests[i].url;
+    const requestQuery = requests[i].serpQuery;
 
     try {
       const code = resp.getResponseCode();
       const text = resp.getContentText() || '';
 
       if (props.serpDebug) {
-        logSerpDebug_(requestUrl, resp);
+        logSerpDebug_(requestUrl, resp, requestQuery);
       }
 
       if (code >= 400) {
@@ -506,7 +513,11 @@ function runSerpDebugOnce(itemQuery) {
   const props = getProps_();
   if (!props.serpApiKey) throw new Error('Missing Script Property: SERPAPI_KEY');
   const engine = props.serpApiEngine || 'google_shopping';
-  const query = encodeURIComponent(itemQuery || '');
+  const rawQuery = getSerpQuery_(
+    itemQuery == null ? 'apples' : itemQuery,
+    'SerpAPI debug'
+  );
+  const query = encodeURIComponent(rawQuery);
   let url = 'https://serpapi.com/search?engine=' + encodeURIComponent(engine) +
     '&q=' + query +
     '&api_key=' + encodeURIComponent(props.serpApiKey) +
@@ -517,17 +528,18 @@ function runSerpDebugOnce(itemQuery) {
 
   const resp = UrlFetchApp.fetch(url, { method: 'get', muteHttpExceptions: true });
   if (props.serpDebug) {
-    logSerpDebug_(url, resp);
+    logSerpDebug_(url, resp, rawQuery);
   } else {
     Logger.log('SERP_DEBUG is false; no SerpAPI debug output will be logged.');
   }
 }
 
-function logSerpDebug_(url, resp) {
+function logSerpDebug_(url, resp, query) {
   const code = resp.getResponseCode();
   const raw = resp.getContentText() || '';
   Logger.log('SERP_DEBUG status: %s', code);
   Logger.log('SERP_DEBUG url: %s', redactSecrets_(url));
+  if (query) Logger.log('SERP_DEBUG q: %s', query);
   Logger.log('SERP_DEBUG raw(0-5000): %s', redactSecrets_(raw.slice(0, 5000)));
   try {
     const parsed = JSON.parse(raw);
@@ -725,12 +737,24 @@ function parseItems_(itemList) {
   raw.forEach(token => {
     if (token.includes('|')) {
       const parts = token.split('|').map(x => x.trim());
-      items.push({ id: parts[0], name: parts[1] || parts[0], query: parts[2] || parts[0] });
+      const id = parts[0];
+      const name = parts[1] || parts[0];
+      const query = parts[2] || parts[0];
+      items.push({ id, name, query });
     } else {
       items.push({ id: slug_(token), name: title_(token), query: token });
     }
   });
   return items;
+}
+
+function getSerpQuery_(rawQuery, context) {
+  const trimmed = String(rawQuery || '').trim();
+  if (!trimmed) {
+    const suffix = context ? ` for ${context}` : '';
+    throw new Error(`Missing SerpAPI query${suffix}. Provide a non-empty q value.`);
+  }
+  return trimmed;
 }
 
 function cacheKeyForQuery_(query) {
