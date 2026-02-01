@@ -117,12 +117,13 @@ function fetchLatestSnapshot() {
     const rr = rapid.byId[it.id];
 
     if (rr && isFinite(rr.usd) && rr.usd > 0) {
+      const description = rr.description || getItemDescription_(it.name, null);
       const sats = usdToSats_(rr.usd, btcUsd);
       return {
         id: it.id,
         name: it.name,
         query: it.query,
-        item_description: rr.description || '',
+        item_description: description,
         usd: rr.usd,
         sats: sats,
         price_source: rr.source,
@@ -132,12 +133,13 @@ function fetchLatestSnapshot() {
 
     const sr = serpById[it.id];
     if (sr && isFinite(sr.usd) && sr.usd > 0) {
+      const description = sr.description || getItemDescription_(it.name, null);
       const sats = usdToSats_(sr.usd, btcUsd);
       return {
         id: it.id,
         name: it.name,
         query: it.query,
-        item_description: sr.description || '',
+        item_description: description,
         usd: sr.usd,
         sats: sats,
         price_source: sr.source,
@@ -149,11 +151,12 @@ function fetchLatestSnapshot() {
       const last = getLastKnownUsd_(it.id, sheet);
       if (isFinite(last) && last > 0) {
         const sats = usdToSats_(last, btcUsd);
+        const description = getItemDescription_(it.name, null);
         return {
           id: it.id,
           name: it.name,
           query: it.query,
-          item_description: '',
+          item_description: description,
           usd: last,
           sats: sats,
           price_source: 'last_known',
@@ -166,7 +169,7 @@ function fetchLatestSnapshot() {
       id: it.id,
       name: it.name,
       query: it.query,
-      item_description: '',
+      item_description: getItemDescription_(it.name, null),
       usd: 0,
       sats: 0,
       price_source: (rr && rr.error) ? ('error:' + rr.error) : 'error',
@@ -391,7 +394,8 @@ function fetchItemsUsdRapidApiBatch_(items, props) {
 
       const data = JSON.parse(text);
       const price = extractLowestPrice_(data, props.maxResultsPerItem);
-      const description = extractItemDescription_(data, props.maxResultsPerItem);
+      const extractedDescription = extractItemDescription_(data, props.maxResultsPerItem);
+      const description = extractedDescription || getItemDescription_(it.name, null);
 
       if (isFinite(price) && price > 0) {
         cache.put(key, JSON.stringify({ usd: price, description: description }), ttl);
@@ -489,7 +493,8 @@ function fetchItemsUsdSerpApiBatch_(items, props) {
       }
 
       const price = Math.min.apply(null, candidates);
-      const description = extractItemDescription_(data, props.maxResultsPerItem);
+      const serpResultForDescription = getSerpResultForDescription_(results);
+      const description = getItemDescription_(it.name, serpResultForDescription);
       if (isFinite(price) && price > 0) {
         const key = cacheKeyForQuery_(it.query);
         cache.put(key, JSON.stringify({ usd: price, description: description }), ttl);
@@ -658,13 +663,14 @@ function getOrCreateHistorySheet_(ss, name) {
     return sh;
   }
 
-  for (let c = 0; c < desiredHeader.length; c++) {
-    const desired = desiredHeader[c];
-    const existing = header[c] ? String(header[c]).trim() : '';
-    if (existing !== desired) {
-      sh.getRange(1, c + 1).setValue(desired);
-    }
-  }
+  const normalized = header.map(h => String(h).trim());
+  desiredHeader.forEach((desired, idx) => {
+    if (normalized.indexOf(desired) !== -1) return;
+    const column = idx + 1;
+    sh.insertColumnBefore(column);
+    sh.getRange(1, column).setValue(desired);
+    normalized.splice(idx, 0, desired);
+  });
 
   sh.setFrozenRows(1);
   return sh;
@@ -853,4 +859,48 @@ function extractItemDescription_(data, maxInspect) {
     }
   }
   return '';
+}
+
+function getSerpResultForDescription_(results) {
+  if (!Array.isArray(results)) return null;
+  for (let i = 0; i < results.length; i++) {
+    const res = results[i];
+    if (res && res.snippet) return res;
+  }
+  return results.length ? results[0] : null;
+}
+
+function getItemDescription_(itemName, serpResult) {
+  if (serpResult && serpResult.snippet) {
+    const snippet = String(serpResult.snippet).trim();
+    if (snippet) return snippet;
+  }
+
+  const normalized = String(itemName || '').trim().toLowerCase();
+  switch (normalized) {
+    case 'honeycrisp apples 3 lb bag':
+      return 'Fresh Honeycrisp apples, sweet and crisp, typically sold in 3 lb produce bags.';
+    case 'grade a large eggs 12 count':
+      return 'Grade A large chicken eggs, commonly sold in cartons of twelve.';
+    case 'whole milk 1 gallon':
+      return 'Pasteurized whole cow’s milk, one gallon container.';
+    case 'unsalted butter 16 oz':
+      return 'Unsalted butter made from cream, standard 16 oz package.';
+    case 'sandwich bread 20 oz loaf':
+      return 'Sliced sandwich bread loaf, approximately 20 oz.';
+    case 'long grain white rice 5 lb bag':
+      return 'Long grain white rice, dry uncooked grains, 5 lb bag.';
+    case 'boneless skinless chicken breast 2 lb':
+      return 'Boneless, skinless chicken breast meat, approximately 2 lb package.';
+    case 'ground beef 80 20 1 lb':
+      return 'Ground beef with 80% lean meat and 20% fat, 1 lb package.';
+    case 'russet potatoes 5 lb bag':
+      return 'Russet potatoes suitable for baking and frying, 5 lb bag.';
+    case 'yellow onions 3 lb bag':
+      return 'Yellow onions commonly used for cooking, 3 lb bag.';
+    default: {
+      const fallback = String(itemName || '').trim();
+      return fallback || 'Grocery item.';
+    }
+  }
 }
