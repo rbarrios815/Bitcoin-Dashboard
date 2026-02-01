@@ -395,6 +395,62 @@ function getItemHistory(itemDescription) {
   return out;
 }
 
+function getAllItemHistories(itemDescriptions) {
+  const props = getProps_();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(props.dataSheetName);
+  if (!sheet) return [];
+
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return [];
+
+  const header = values[0];
+  const idx = headerIndex_(header);
+  const outByNormalized = {};
+  const targets = Array.isArray(itemDescriptions) ? itemDescriptions : [];
+  const targetSet = {};
+  const useFilter = targets.length > 0;
+
+  targets.forEach(desc => {
+    const cleaned = String(desc || '').trim();
+    if (!cleaned) return;
+    const normalized = normalizeDescription_(cleaned);
+    if (!normalized) return;
+    targetSet[normalized] = true;
+    if (!outByNormalized[normalized]) {
+      outByNormalized[normalized] = { description: cleaned, history: [] };
+    }
+  });
+
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const rowDescription = String(row[idx.item_description] || '').trim();
+    if (!rowDescription) continue;
+    const normalized = normalizeDescription_(rowDescription);
+    if (useFilter && !targetSet[normalized]) continue;
+    if (!outByNormalized[normalized]) {
+      outByNormalized[normalized] = { description: rowDescription, history: [] };
+    }
+    outByNormalized[normalized].history.push({
+      ts: new Date(row[idx.timestamp]).toISOString(),
+      usd: Number(row[idx.usd]),
+      sats: Number(row[idx.sats]),
+      btcUsd: Number(row[idx.btc_usd]),
+      price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
+      is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false
+    });
+  }
+
+  const out = Object.keys(outByNormalized).map(key => {
+    const entry = outByNormalized[key];
+    entry.history.sort((a, b) => new Date(a.ts) - new Date(b.ts));
+    return entry;
+  });
+
+  out.sort((a, b) => a.description.localeCompare(b.description));
+  return out;
+}
+
 function getBasketHistory() {
   const props = getProps_();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
