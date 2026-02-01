@@ -206,13 +206,7 @@
 
       <div class="card" style="grid-column: 1 / -1;">
         <div class="row" style="justify-content:space-between;">
-          <h3 style="margin:0;">Selected item history</h3>
-          <div class="row">
-            <select id="mode">
-              <option value="usd">USD</option>
-              <option value="sats">sats</option>
-            </select>
-          </div>
+          <h3 style="margin:0;" id="itemTitle">Item history</h3>
         </div>
 
         <div style="height:12px"></div>
@@ -365,21 +359,24 @@
   async function renderItemHistory(){
     if (!activeItemId) return;
 
-    const mode = $("mode").value;
+    const item = cfg.items.find(x => x.id === activeItemId);
+    const latestRow = latest?.items?.find(x => x.id === activeItemId);
+    const description = latestRow?.item_description || item?.name || "Item history";
 
     const hist = await new Promise((resolve, reject) => {
-      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getItemHistory(activeItemId);
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getItemHistory(description);
     });
 
-    const item = cfg.items.find(x => x.id === activeItemId);
     const staleCount = hist.filter(x => x.is_stale).length;
 
+    $("itemTitle").textContent = description;
     $("itemNote").innerHTML =
-      (item ? ("Query: <b>" + escapeHtml(item.query) + "</b>") : "") +
+      (description ? ("Description: <b>" + escapeHtml(description) + "</b>") : "") +
       (staleCount ? (" — <span class='warn'>" + staleCount + " stale points</span>") : "");
 
     const labels = hist.map(p => new Date(p.ts).toLocaleString());
-    const series = hist.map(p => mode === "usd" ? p.usd : p.sats);
+    const usdSeries = hist.map(p => Number(p.usd) * 1000);
+    const satsSeries = hist.map(p => Number(p.sats));
 
     itemChart = destroyChartSafe(itemChart);
 
@@ -389,8 +386,22 @@
       data: {
         labels,
         datasets: [{
-          label: mode === "usd" ? "Price (USD)" : "Price (sats)",
-          data: series,
+          label: "USD (x1000)",
+          data: usdSeries,
+          borderColor: "#7dd3fc",
+          backgroundColor: "rgba(125,211,252,0.15)",
+          pointBackgroundColor: "#7dd3fc",
+          pointBorderColor: "#7dd3fc",
+          borderWidth: 2,
+          tension: 0.25,
+          pointRadius: 2
+        }, {
+          label: "sats",
+          data: satsSeries,
+          borderColor: "#fbbf24",
+          backgroundColor: "rgba(251,191,36,0.15)",
+          pointBackgroundColor: "#fbbf24",
+          pointBorderColor: "#fbbf24",
           borderWidth: 2,
           tension: 0.25,
           pointRadius: 2
@@ -401,7 +412,15 @@
         maintainAspectRatio: false,
         animation: false,
         plugins: { legend: { display: true } },
-        scales: { x: { ticks: { maxTicksLimit: 6 } } }
+        scales: {
+          x: { ticks: { maxTicksLimit: 6 } },
+          y: {
+            title: {
+              display: true,
+              text: ["USD (x1000)", "sats"]
+            }
+          }
+        }
       }
     });
   }
@@ -445,7 +464,6 @@
     });
   }
 
-  $("mode").addEventListener("change", renderItemHistory);
   $("btnFetch").addEventListener("click", fetchLatest);
   $("btnRecord").addEventListener("click", recordSnapshot);
   $("btnBasket").addEventListener("click", renderBasket);
