@@ -186,7 +186,8 @@ function fetchLatestSnapshot() {
     : {};
 
   const enriched = priced.map(item => {
-    const firstAvailable = firstAvailableByDescription[item.item_description] || null;
+    const normalized = normalizeDescription_(item.item_description);
+    const firstAvailable = firstAvailableByDescription[normalized] || null;
     return Object.assign({}, item, { first_available: firstAvailable });
   });
 
@@ -253,6 +254,114 @@ function getConfig() {
   };
 }
 
+function getLatestSnapshotFromSheet() {
+  const props = getProps_();
+  validateSheetProps_(props);
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(props.dataSheetName);
+  const items = parseItems_(props.itemList);
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    return {
+      ts: null,
+      btcUsd: null,
+      items: items.map(it => ({
+        id: it.id,
+        name: it.name,
+        query: it.query,
+        item_description: applyItemDescription_(it.name, null, null),
+        usd: 0,
+        sats: 0,
+        source_url: '',
+        price_source: '',
+        is_stale: true,
+        first_available: null
+      })),
+      basketIndexUsd: 0,
+      basketIndexSats: 0
+    };
+  }
+
+  const values = sheet.getDataRange().getValues();
+  const header = values[0];
+  const idx = headerIndex_(header);
+
+  const latestByDescription = {};
+  const earliestByDescription = {};
+  let latestTs = null;
+  let latestBasketUsd = null;
+  let latestBasketSats = null;
+  let latestBtcUsd = null;
+
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const desc = String(row[idx.item_description] || '').trim();
+    if (!desc) continue;
+
+    const tsValue = row[idx.timestamp];
+    const ts = tsValue ? new Date(tsValue) : null;
+    if (!ts || Number.isNaN(ts.getTime())) continue;
+
+    const normalized = normalizeDescription_(desc);
+    if (!latestByDescription[normalized] || ts > latestByDescription[normalized].ts) {
+      latestByDescription[normalized] = {
+        ts,
+        item_description: desc,
+        usd: Number(row[idx.usd]),
+        sats: Number(row[idx.sats]),
+        price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
+        is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false
+      };
+    }
+
+    if (!earliestByDescription[normalized] || ts < earliestByDescription[normalized].ts) {
+      earliestByDescription[normalized] = {
+        ts,
+        usd: Number(row[idx.usd]),
+        sats: Number(row[idx.sats])
+      };
+    }
+
+    if (!latestTs || ts > latestTs) {
+      latestTs = ts;
+      latestBasketUsd = Number(row[idx.basket_index_usd]);
+      latestBasketSats = Number(row[idx.basket_index_sats]);
+      latestBtcUsd = Number(row[idx.btc_usd]);
+    }
+  }
+
+  const payloadItems = items.map(it => {
+    const fallbackDescription = applyItemDescription_(it.name, null, null);
+    const normalized = normalizeDescription_(fallbackDescription);
+    const latestRow = latestByDescription[normalized] || null;
+    const earliestRow = earliestByDescription[normalized] || null;
+    const description = latestRow?.item_description || fallbackDescription;
+    return {
+      id: it.id,
+      name: it.name,
+      query: it.query,
+      item_description: description,
+      usd: latestRow ? latestRow.usd : 0,
+      sats: latestRow ? latestRow.sats : 0,
+      source_url: '',
+      price_source: latestRow ? latestRow.price_source : '',
+      is_stale: latestRow ? latestRow.is_stale : true,
+      first_available: earliestRow
+        ? { ts: new Date(earliestRow.ts).toISOString(), usd: earliestRow.usd, sats: earliestRow.sats }
+        : null
+    };
+  });
+
+  return {
+    ts: latestTs ? latestTs.toISOString() : null,
+    btcUsd: isFinite(latestBtcUsd) ? latestBtcUsd : null,
+    items: payloadItems,
+    basketIndexUsd: isFinite(latestBasketUsd) ? latestBasketUsd : 0,
+    basketIndexSats: isFinite(latestBasketSats) ? latestBasketSats : 0
+  };
+}
+
 function getItemHistory(itemDescription) {
   const props = getProps_();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -267,10 +376,12 @@ function getItemHistory(itemDescription) {
   const out = [];
 
   const targetDescription = String(itemDescription || '').trim();
+  const targetNormalized = normalizeDescription_(targetDescription);
   for (let r = 1; r < values.length; r++) {
     const row = values[r];
     const rowDescription = String(row[idx.item_description] || '').trim();
-    if (!rowDescription || rowDescription !== targetDescription) continue;
+    if (!rowDescription) continue;
+    if (normalizeDescription_(rowDescription) !== targetNormalized) continue;
     out.push({
       ts: new Date(row[idx.timestamp]).toISOString(),
       usd: Number(row[idx.usd]),
@@ -599,7 +710,7 @@ function getFirstAvailableByDescriptions_(descriptions, sheet) {
   const idx = headerIndex_(header);
   const desired = {};
   descriptions.forEach(desc => {
-    const key = String(desc || '').trim();
+    const key = normalizeDescription_(String(desc || '').trim());
     if (key) desired[key] = true;
   });
 
@@ -607,7 +718,8 @@ function getFirstAvailableByDescriptions_(descriptions, sheet) {
   for (let r = 1; r < values.length; r++) {
     const row = values[r];
     const desc = String(row[idx.item_description] || '').trim();
-    if (!desc || !desired[desc]) continue;
+    const normalized = normalizeDescription_(desc);
+    if (!normalized || !desired[normalized]) continue;
 
     const tsValue = row[idx.timestamp];
     const ts = tsValue ? new Date(tsValue).toISOString() : null;
@@ -615,13 +727,13 @@ function getFirstAvailableByDescriptions_(descriptions, sheet) {
     const sats = Number(row[idx.sats]);
     if (!ts || !isFinite(usd) || !isFinite(sats)) continue;
 
-    if (!out[desc]) {
-      out[desc] = { ts, usd, sats };
+    if (!out[normalized]) {
+      out[normalized] = { ts, usd, sats, item_description: desc };
       continue;
     }
 
-    if (new Date(ts) < new Date(out[desc].ts)) {
-      out[desc] = { ts, usd, sats };
+    if (new Date(ts) < new Date(out[normalized].ts)) {
+      out[normalized] = { ts, usd, sats, item_description: desc };
     }
   }
   return out;
@@ -805,6 +917,15 @@ function validateProps_(p) {
   }
 }
 
+function validateSheetProps_(p) {
+  const missing = [];
+  if (!p.dataSheetName) missing.push('DATA_SHEET_NAME');
+  if (!p.itemList) missing.push('ITEM_LIST');
+  if (missing.length) {
+    throw new Error('Missing Script Properties: ' + missing.join(', '));
+  }
+}
+
 function parseItems_(itemList) {
   const raw = itemList.split(',').map(s => s.trim()).filter(Boolean);
   const items = [];
@@ -849,6 +970,9 @@ function slug_(s) {
 function title_(s) {
   const t = String(s).trim();
   return t.charAt(0).toUpperCase() + t.slice(1);
+}
+function normalizeDescription_(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 function addParam_(url, k, v) {
   const sep = url.includes('?') ? '&' : '?';

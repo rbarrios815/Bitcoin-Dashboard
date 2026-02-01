@@ -264,6 +264,13 @@
     return dt.toLocaleDateString();
   }
 
+  function priceCompareClass(current, original){
+    if (!isFinite(current) || !isFinite(original)) return "";
+    if (current > original) return "bad";
+    if (current < original) return "good";
+    return "";
+  }
+
   function destroyChartSafe(ch){
     if (ch && typeof ch.destroy === "function") ch.destroy();
     return null;
@@ -303,6 +310,8 @@
       const firstDate = fmtDate(first?.ts);
       const firstUsd = first?.usd != null ? fmtUsd(first.usd) : "—";
       const firstSats = first?.sats != null ? fmtSats(first.sats) : "—";
+      const usdClass = priceCompareClass(usd, first?.usd);
+      const satsClass = priceCompareClass(sats, first?.sats);
 
       const div = document.createElement("div");
       div.className = "item" + (it.id === activeItemId ? " active" : "");
@@ -314,8 +323,8 @@
       div.innerHTML = `
         <div class="name">${escapeHtml(description)} ${badge}</div>
         <div class="meta">
-          <span>${usd != null ? fmtUsd(usd) : "—"}</span>
-          <span>${sats != null ? fmtSats(sats) : "—"}</span>
+          <span class="${usdClass}">${usd != null ? fmtUsd(usd) : "—"}</span>
+          <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span>
           ${sourceUrl ? `<a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source</a>` : ""}
         </div>
         <div class="first-available">
@@ -336,6 +345,35 @@
     cfg = await new Promise((resolve, reject) => {
       google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getConfig();
     });
+  }
+
+  async function loadLatestFromSheet(){
+    setStatus("Loading latest snapshot from sheet...");
+
+    try{
+      latest = await new Promise((resolve, reject) => {
+        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getLatestSnapshotFromSheet();
+      });
+
+      if (latest?.btcUsd != null) {
+        $("btcUsd").textContent = fmtUsd(latest.btcUsd);
+      } else {
+        $("btcUsd").textContent = "—";
+      }
+
+      if (!activeItemId && cfg.items.length) activeItemId = cfg.items[0].id;
+      renderItems();
+      await renderItemHistory();
+      await renderBasket();
+
+      if (latest?.ts) {
+        setStatus("Loaded latest snapshot from sheet: <b>" + new Date(latest.ts).toLocaleString() + "</b>");
+      } else {
+        setStatus("Loaded config. No snapshot rows found in the sheet yet.");
+      }
+    } catch (err) {
+      setStatus("<b style='color:#fb7185'>Sheet load failed:</b> " + escapeHtml(String(err)));
+    }
   }
 
   async function fetchLatest(){
@@ -505,8 +543,7 @@
   (async () => {
     try {
       await loadConfig();
-      renderItems();
-      setStatus('Loaded. Next: run <b>setupOnce()</b> once (in Apps Script), then click <b>Fetch Latest</b>.');
+      await loadLatestFromSheet();
     } catch (err) {
       setStatus("<b style='color:#fb7185'>Init failed:</b> " + escapeHtml(String(err)));
     }
