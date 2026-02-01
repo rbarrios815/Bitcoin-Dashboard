@@ -31,7 +31,7 @@
    ========================= */
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle('Grocery Price Tracker (USD + sats)')
+    .setTitle('Commodity Price Tracker')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -1147,12 +1147,26 @@ function parseItems_(itemList) {
       items.push({ id: slug_(token), name: title_(token), query: defaultQueryForItem_(token) });
     }
   });
+  ensureCommodityItems_(items);
   return items;
+}
+
+function ensureCommodityItems_(items) {
+  const ids = new Set(items.map(item => String(item.id || '').trim().toLowerCase()));
+  const addCommodity = (id, name) => {
+    if (ids.has(id)) return;
+    items.push({ id, name, query: defaultQueryForItem_(name) });
+    ids.add(id);
+  };
+  addCommodity('gold', 'Gold');
+  addCommodity('silver', 'Silver');
 }
 
 function defaultQueryForItem_(itemName) {
   const normalized = String(itemName || '').trim().toLowerCase();
   const overrides = {
+    gold: '1 gram gold bar',
+    silver: '1 gram silver bar',
     'ground beef': 'ground beef 80/20 1 lb'
   };
   return overrides[normalized] || itemName;
@@ -1408,7 +1422,9 @@ function getStandardItemDescription_(itemName) {
     chicken: 'Boneless skinless chicken breast 2 lb',
     'ground beef': 'Ground beef 80 20 1 lb',
     potatoes: 'Russet potatoes 5 lb bag',
-    'yellow onions': 'Yellow onions 3 lb bag'
+    'yellow onions': 'Yellow onions 3 lb bag',
+    gold: 'Gold 1 gram bar',
+    silver: 'Silver 1 gram bar'
   };
   if (descriptionOverrides[normalized]) return descriptionOverrides[normalized];
   return '';
@@ -1446,6 +1462,10 @@ function getItemDescription_(itemName, serpResult) {
       return 'Russet potatoes suitable for baking and frying, 5 lb bag.';
     case 'yellow onions 3 lb bag':
       return 'Yellow onions commonly used for cooking, 3 lb bag.';
+    case 'gold 1 gram bar':
+      return 'Gold bullion bar weighing approximately 1 gram.';
+    case 'silver 1 gram bar':
+      return 'Silver bullion bar weighing approximately 1 gram.';
     default: {
       const fallback = String(itemName || '').trim();
       return fallback || 'Grocery item.';

@@ -3,7 +3,7 @@
 <head>
   <base target="_top">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Grocery Price Tracker</title>
+  <title>Commodity Price Tracker</title>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
@@ -46,6 +46,29 @@
     .sub{ font-size:12px; color:var(--muted); margin-top:6px; line-height:1.35; }
 
     .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .toggle-group{
+      display:flex;
+      gap:6px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+    .toggle-btn{
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.18);
+      padding:6px 12px;
+      font-weight:800;
+      font-size:11px;
+      letter-spacing:.4px;
+      text-transform:uppercase;
+      background: rgba(0,0,0,.25);
+      color:var(--muted);
+      cursor:pointer;
+    }
+    .toggle-btn.active{
+      color:var(--text);
+      border-color: rgba(125,211,252,.6);
+      background: linear-gradient(135deg, rgba(125,211,252,0.25), rgba(196,181,253,0.22));
+    }
     .btn{
       background: linear-gradient(135deg, rgba(125,211,252,0.28), rgba(196,181,253,0.22));
       border: 1px solid rgba(255,255,255,0.14);
@@ -270,8 +293,12 @@
   <div class="wrap">
     <div class="topbar">
       <div>
-        <div class="title">Grocery Price Tracker (USD + sats)</div>
+        <div class="title" id="pageTitle">Commodity Price Tracker</div>
         <div class="sub" id="status">Loaded. Run <b>setupOnce()</b> once in Apps Script, then use the buttons here.</div>
+        <div class="row" style="margin-top:8px;">
+          <span class="filter-label">Commodity view</span>
+          <div class="toggle-group" id="commodityToggle" role="group" aria-label="Commodity view toggle"></div>
+        </div>
         <div class="progress-wrap" id="fetchProgress" aria-live="polite">
           <div class="progress-bar" aria-hidden="true"><span id="fetchProgressBar"></span></div>
           <div class="progress-meta" id="fetchProgressMeta">Fetching latest snapshot…</div>
@@ -301,16 +328,16 @@
             <div class="val" id="btcUsd">—</div>
           </div>
           <div class="kpi">
-            <div class="label">Inflation vs baseline (USD)</div>
-            <div class="val" id="infl">—</div>
+            <div class="label" id="basketIndexLabel">Basket Index</div>
+            <div class="val" id="basketIndex">—</div>
           </div>
           <div class="kpi">
-            <div class="label">Inflation vs baseline (sats)</div>
-            <div class="val" id="inflSats">—</div>
+            <div class="label" id="inflLabel">Inflation vs baseline</div>
+            <div class="val" id="infl">—</div>
           </div>
         </div>
         <div class="note">
-          Inflation vs baseline compares the latest basket index (USD or sats) to your first recorded snapshot.
+          Inflation vs baseline compares the latest basket index in the selected commodity units to your first recorded snapshot.
           A positive percentage means the latest basket costs more than the baseline and will be in red (inflation exists).
           A negative percentage means the latest basket costs less than the baseline and will be in green (deflation exists).
         </div>
@@ -345,6 +372,7 @@
             <thead>
               <tr>
                 <th>Date/time</th>
+                <th id="historyCommodityLabel">Commodity</th>
                 <th>USD</th>
                 <th>Sats</th>
                 <th>Vendor</th>
@@ -367,6 +395,12 @@
   let latest = null;
   let activeItemId = null;
   let itemViewMode = "selected";
+  let commodityMode = "grocery";
+  let referenceHistory = {
+    basket: [],
+    gold: [],
+    silver: []
+  };
 
   let itemCharts = [];
   let basketChart = null;
@@ -379,6 +413,14 @@
   const FETCH_MIN_MS = 2000;
   const FETCH_MAX_MS = 60000;
 
+  const COMMODITIES = [
+    { id: "grocery", label: "Grocery Items", unitLabel: "grocery items", unitShort: "items", precision: 2 },
+    { id: "sats", label: "Satoshis", unitLabel: "10,000 sats", unitShort: "x10k sats", precision: 2 },
+    { id: "dollars", label: "Dollars", unitLabel: "$10", unitShort: "x$10", precision: 2 },
+    { id: "gold", label: "Gold", unitLabel: "1 gram gold", unitShort: "g gold", precision: 4 },
+    { id: "silver", label: "Silver", unitLabel: "1 gram silver", unitShort: "g silver", precision: 4 }
+  ];
+
   const $ = (id) => document.getElementById(id);
 
   function setStatus(msg){ $("status").innerHTML = msg; }
@@ -390,6 +432,11 @@
   function fmtSats(n){
     if (!isFinite(n)) return "—";
     return Math.round(n).toLocaleString() + " sats";
+  }
+  function fmtCommodity(n){
+    if (!isFinite(n)) return "—";
+    const cfg = getCommodityConfig();
+    return n.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
   }
   function fmtDate(d){
     if (!d) return "—";
@@ -529,6 +576,159 @@
     return "";
   }
 
+  function normalizeKey(s){
+    return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  }
+
+  function getCommodityConfig(){
+    return COMMODITIES.find(x => x.id === commodityMode) || COMMODITIES[0];
+  }
+
+  function updateCommodityTitle(){
+    const cfg = getCommodityConfig();
+    const title = `Commodity Price Tracker — ${cfg.label}`;
+    const titleEl = $("pageTitle");
+    if (titleEl) titleEl.textContent = title;
+    document.title = title;
+    $("basketIndexLabel").textContent = `Basket Index (${cfg.unitLabel})`;
+    $("inflLabel").textContent = `Inflation vs baseline (${cfg.unitLabel})`;
+    $("historyCommodityLabel").textContent = `${cfg.label} (${cfg.unitLabel})`;
+  }
+
+  function renderCommodityToggle(){
+    const root = $("commodityToggle");
+    if (!root) return;
+    root.innerHTML = "";
+    COMMODITIES.forEach(opt => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "toggle-btn" + (commodityMode === opt.id ? " active" : "");
+      btn.textContent = opt.label;
+      btn.setAttribute("aria-pressed", commodityMode === opt.id ? "true" : "false");
+      btn.onclick = () => setCommodityMode(opt.id);
+      root.appendChild(btn);
+    });
+  }
+
+  async function setCommodityMode(mode){
+    if (commodityMode === mode) return;
+    commodityMode = mode;
+    renderCommodityToggle();
+    updateCommodityTitle();
+    await ensureCommodityReferences();
+    renderItems();
+    await renderItemHistory();
+    await renderBasket();
+  }
+
+  function getLatestCommodityUsd(type){
+    if (!latest?.items?.length) return NaN;
+    const match = latest.items.find(item => normalizeKey(item.name) === type);
+    return match?.usd;
+  }
+
+  function findReferenceValue(history, ts, key){
+    if (!history || !history.length) return null;
+    if (!ts) return history[history.length - 1][key];
+    const target = new Date(ts).getTime();
+    if (!Number.isFinite(target)) return history[history.length - 1][key];
+    let best = null;
+    for (let i = 0; i < history.length; i++) {
+      const t = new Date(history[i].ts).getTime();
+      if (t <= target) best = history[i];
+      if (t > target) break;
+    }
+    return (best || history[0])[key];
+  }
+
+  function getReferenceUsd(type, ts){
+    if (type === "gold") {
+      const value = findReferenceValue(referenceHistory.gold, ts, "usd");
+      return isFinite(value) ? value : getLatestCommodityUsd("gold");
+    }
+    if (type === "silver") {
+      const value = findReferenceValue(referenceHistory.silver, ts, "usd");
+      return isFinite(value) ? value : getLatestCommodityUsd("silver");
+    }
+    if (type === "grocery") {
+      const value = findReferenceValue(referenceHistory.basket, ts, "basketIndexUsd");
+      return isFinite(value) ? value : null;
+    }
+    return null;
+  }
+
+  function getCommodityValue(usd, sats, ts){
+    if (!isFinite(usd) && !isFinite(sats)) return NaN;
+    switch (commodityMode) {
+      case "sats":
+        return isFinite(sats) ? (sats / 10000) : NaN;
+      case "dollars":
+        return isFinite(usd) ? (usd / 10) : NaN;
+      case "gold": {
+        const ref = getReferenceUsd("gold", ts);
+        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) : NaN;
+      }
+      case "silver": {
+        const ref = getReferenceUsd("silver", ts);
+        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) : NaN;
+      }
+      case "grocery":
+      default: {
+        const ref = getReferenceUsd("grocery", ts);
+        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) : NaN;
+      }
+    }
+  }
+
+  function getCommodityDescriptionByName(name){
+    const normalized = normalizeKey(name);
+    const match = latest?.items?.find(item => normalizeKey(item.name) === normalized);
+    return match?.item_description || "";
+  }
+
+  async function loadCommodityHistories(){
+    const descriptions = [];
+    const goldDescription = getCommodityDescriptionByName("gold");
+    const silverDescription = getCommodityDescriptionByName("silver");
+    if (goldDescription) descriptions.push(goldDescription);
+    if (silverDescription) descriptions.push(silverDescription);
+
+    if (!descriptions.length) {
+      referenceHistory.gold = [];
+      referenceHistory.silver = [];
+      return;
+    }
+
+    referenceHistory.gold = [];
+    referenceHistory.silver = [];
+    const histories = await new Promise((resolve, reject) => {
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getAllItemHistories(descriptions);
+    });
+
+    histories.forEach(entry => {
+      const key = normalizeKey(entry.description);
+      if (goldDescription && key === normalizeKey(goldDescription)) {
+        referenceHistory.gold = entry.history || [];
+      }
+      if (silverDescription && key === normalizeKey(silverDescription)) {
+        referenceHistory.silver = entry.history || [];
+      }
+    });
+  }
+
+  async function ensureCommodityReferences(){
+    if (!referenceHistory.basket.length) {
+      referenceHistory.basket = await new Promise((resolve, reject) => {
+        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getBasketHistory();
+      });
+    }
+    if (commodityMode === "gold" || commodityMode === "silver") {
+      if (!referenceHistory.gold.length && !referenceHistory.silver.length) {
+        await loadCommodityHistories();
+      }
+    }
+  }
+
   function renderItems(){
     const root = $("items");
     root.innerHTML = "";
@@ -544,6 +744,7 @@
       const sourceUrl = getSourceUrl(row);
       const first = row?.first_available;
       const firstDate = fmtDate(first?.ts);
+      const firstCommodity = first ? fmtCommodity(getCommodityValue(first.usd, first.sats, first.ts)) : "—";
       const firstUsd = first?.usd != null ? fmtUsd(first.usd) : "—";
       const firstSats = first?.sats != null ? fmtSats(first.sats) : "—";
       const vendorCount = Number.isFinite(row?.vendor_count) ? row.vendor_count : 0;
@@ -551,6 +752,7 @@
       const satsClass = priceCompareClass(sats, first?.sats);
       const isUnverified = !stale && !hasSourceUrl(row);
       const latestTs = row?.ts ? fmtDateTime(row.ts) : (latest?.ts ? fmtDateTime(latest.ts) : "—");
+      const commodityValue = getCommodityValue(usd, sats, row?.ts || latest?.ts);
 
       const div = document.createElement("div");
       div.className = "item" + (it.id === activeItemId ? " active" : "");
@@ -565,13 +767,14 @@
         <div class="name">${escapeHtml(description)} ${badge}</div>
         <div class="meta">
           <span>
-            Latest: <span class="${usdClass}">${usd != null ? fmtUsd(usd) : "—"}</span> /
+            Latest: <span>${fmtCommodity(commodityValue)}</span> •
+            <span class="${usdClass}">${usd != null ? fmtUsd(usd) : "—"}</span> /
             <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span>
             <span>as of ${escapeHtml(latestTs)}</span>
           </span>
         </div>
         <div class="first-available">
-          <span>Earliest: ${firstUsd} / ${firstSats} on ${firstDate}</span>
+          <span>Earliest: ${firstCommodity} • ${firstUsd} / ${firstSats} on ${firstDate}</span>
           <span>
             Vendors seen: ${vendorCount}
             ${sourceUrl ? `• <a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source URL</a>` : "• No source URL"}
@@ -609,6 +812,9 @@
       }
 
       if (!activeItemId && cfg.items.length) activeItemId = cfg.items[0].id;
+      renderCommodityToggle();
+      updateCommodityTitle();
+      await ensureCommodityReferences();
       renderItems();
       await renderItemHistory();
       await renderBasket();
@@ -638,6 +844,9 @@
       $("btcUsd").textContent = fmtUsd(latest.btcUsd);
 
       if (!activeItemId && cfg.items.length) activeItemId = cfg.items[0].id;
+      renderCommodityToggle();
+      updateCommodityTitle();
+      await ensureCommodityReferences();
       renderItems();
 
       await renderItemHistory();
@@ -698,30 +907,20 @@
 
   function buildItemChart(canvas, hist){
     const labels = hist.map(p => new Date(p.ts).toLocaleString());
-    const usdSeries = hist.map(p => Number(p.usd) * 1000);
-    const satsSeries = hist.map(p => Number(p.sats));
+    const commoditySeries = hist.map(p => getCommodityValue(Number(p.usd), Number(p.sats), p.ts));
+    const cfg = getCommodityConfig();
 
     const chart = new Chart(canvas.getContext("2d"), {
       type: "line",
       data: {
         labels,
         datasets: [{
-          label: "USD (x1000)",
-          data: usdSeries,
+          label: `${cfg.label} (${cfg.unitLabel})`,
+          data: commoditySeries,
           borderColor: "#7dd3fc",
           backgroundColor: "rgba(125,211,252,0.15)",
           pointBackgroundColor: "#7dd3fc",
           pointBorderColor: "#7dd3fc",
-          borderWidth: 2,
-          tension: 0.25,
-          pointRadius: 2
-        }, {
-          label: "sats",
-          data: satsSeries,
-          borderColor: "#fbbf24",
-          backgroundColor: "rgba(251,191,36,0.15)",
-          pointBackgroundColor: "#fbbf24",
-          pointBorderColor: "#fbbf24",
           borderWidth: 2,
           tension: 0.25,
           pointRadius: 2
@@ -737,7 +936,7 @@
           y: {
             title: {
               display: true,
-              text: ["USD (x1000)", "sats"]
+              text: cfg.unitLabel
             }
           }
         }
@@ -760,9 +959,13 @@
     const sortedTs = Array.from(timestamps).sort((a, b) => new Date(a) - new Date(b));
     const labels = sortedTs.map(ts => new Date(ts).toLocaleString());
 
+    const cfg = getCommodityConfig();
     const datasets = allHistories.map((item, idx) => {
       const color = palette[idx % palette.length];
-      const map = new Map((item.history || []).map(point => [point.ts, Number(point.usd) * 1000]));
+      const map = new Map((item.history || []).map(point => [
+        point.ts,
+        getCommodityValue(Number(point.usd), Number(point.sats), point.ts)
+      ]));
       return {
         label: item.description,
         data: sortedTs.map(ts => map.has(ts) ? map.get(ts) : null),
@@ -788,7 +991,7 @@
         plugins: { legend: { display: true } },
         scales: {
           x: { ticks: { maxTicksLimit: 6 } },
-          y: { title: { display: true, text: "USD (x1000)" } }
+          y: { title: { display: true, text: cfg.unitLabel } }
         }
       }
     });
@@ -834,7 +1037,7 @@
         ? `<span class='warn'>${staleCount} stale points</span>`
         : "Selected item first, then all other items, with the combined chart at the bottom.";
       $("itemVendors").innerHTML = "<span class='badge'>Select a single item to see vendors</span>";
-      $("itemHistoryRows").innerHTML = "<tr><td colspan='7'>Select a single item to see detailed records.</td></tr>";
+      $("itemHistoryRows").innerHTML = "<tr><td colspan='8'>Select a single item to see detailed records.</td></tr>";
       return;
     }
 
@@ -877,16 +1080,18 @@
 
     const rowsRoot = $("itemHistoryRows");
     if (!hist.length) {
-      rowsRoot.innerHTML = "<tr><td colspan='7'>No history rows yet.</td></tr>";
+      rowsRoot.innerHTML = "<tr><td colspan='8'>No history rows yet.</td></tr>";
     } else {
       const orderedHistory = [...hist].sort((a, b) => new Date(b.ts) - new Date(a.ts));
       rowsRoot.innerHTML = orderedHistory.map(point => {
         const vendorLabel = isValidVendor(point.price_vendor) ? point.price_vendor : "—";
         const providerLabel = point.price_source ? point.price_source : "—";
         const sourceUrl = hasSourceUrl(point) ? point.source_url : "";
+        const commodityValue = getCommodityValue(Number(point.usd), Number(point.sats), point.ts);
         return `
           <tr>
             <td>${escapeHtml(fmtDateTime(point.ts))}</td>
+            <td>${escapeHtml(fmtCommodity(commodityValue))}</td>
             <td>${escapeHtml(fmtUsd(point.usd))}</td>
             <td>${escapeHtml(fmtSats(point.sats))}</td>
             <td>${escapeHtml(vendorLabel)}</td>
@@ -904,20 +1109,24 @@
       google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getBasketHistory();
     });
 
-    const infl = await new Promise((resolve, reject) => {
-      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getBasketInflation();
+    referenceHistory.basket = hist;
+    const cfg = getCommodityConfig();
+    const series = hist.map(point => {
+      const usd = Number(point.basketIndexUsd);
+      const sats = Number(point.basketIndexSats);
+      return getCommodityValue(usd, sats, point.ts);
     });
-
-    const usdPct = Number(infl.inflationPctUsd ?? infl.inflationPct ?? 0);
-    const satsPct = Number(infl.inflationPctSats ?? 0);
-    const usdCls = usdPct >= 0 ? "bad" : "good";
-    const satsCls = satsPct >= 0 ? "bad" : "good";
-    $("infl").innerHTML = `<span class="${usdCls}">${usdPct.toFixed(2)}%</span>`;
-    $("inflSats").innerHTML = `<span class="${satsCls}">${satsPct.toFixed(2)}%</span>`;
+    const first = series.find(val => isFinite(val));
+    const last = [...series].reverse().find(val => isFinite(val));
+    const inflationPct = (isFinite(first) && isFinite(last) && first !== 0)
+      ? ((last / first) - 1) * 100
+      : 0;
+    const inflCls = inflationPct >= 0 ? "bad" : "good";
+    $("infl").innerHTML = `<span class="${inflCls}">${inflationPct.toFixed(2)}%</span>`;
+    $("basketIndex").textContent = fmtCommodity(last);
 
     const labels = hist.map(p => new Date(p.ts).toLocaleDateString());
-    const usd = hist.map(p => Number(p.basketIndexUsd) * 1000);
-    const sats = hist.map(p => Number(p.basketIndexSats));
+    const values = hist.map(p => getCommodityValue(Number(p.basketIndexUsd), Number(p.basketIndexSats), p.ts));
 
     basketChart = destroyChartSafe(basketChart);
 
@@ -927,8 +1136,7 @@
       data: {
         labels,
         datasets: [
-          { label: "Basket Index (USD x1000)", data: usd, borderWidth: 2, tension: 0.25, pointRadius: 2 },
-          { label: "Basket Index (sats)", data: sats, borderWidth: 2, tension: 0.25, pointRadius: 2 }
+          { label: `Basket Index (${cfg.unitLabel})`, data: values, borderWidth: 2, tension: 0.25, pointRadius: 2 }
         ]
       },
       options: {
