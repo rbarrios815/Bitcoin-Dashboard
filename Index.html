@@ -215,6 +215,41 @@
       text-transform:uppercase;
       font-size:11px;
     }
+    .progress-wrap{
+      margin-top:10px;
+      display:none;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    .progress-wrap.active{
+      display:flex;
+    }
+    .progress-bar{
+      position:relative;
+      width:240px;
+      max-width:100%;
+      height:8px;
+      border-radius:999px;
+      background:rgba(255,255,255,.12);
+      overflow:hidden;
+    }
+    .progress-bar span{
+      position:absolute;
+      inset:0;
+      width:0%;
+      border-radius:999px;
+      background: linear-gradient(90deg, rgba(125,211,252,.85), rgba(196,181,253,.85));
+      transition: width .2s ease;
+    }
+    .progress-meta{
+      font-size:12px;
+      color:var(--muted);
+      font-weight:700;
+    }
+    .progress-meta b{
+      color:var(--text);
+    }
   </style>
 </head>
 
@@ -224,6 +259,10 @@
       <div>
         <div class="title">Grocery Price Tracker (USD + sats)</div>
         <div class="sub" id="status">Loaded. Run <b>setupOnce()</b> once in Apps Script, then use the buttons here.</div>
+        <div class="progress-wrap" id="fetchProgress" aria-live="polite">
+          <div class="progress-bar" aria-hidden="true"><span id="fetchProgressBar"></span></div>
+          <div class="progress-meta" id="fetchProgressMeta">Fetching latest snapshot…</div>
+        </div>
       </div>
       <div class="row">
         <button class="btn" id="btnFetch">Fetch Latest</button>
@@ -321,6 +360,14 @@
 
   let itemCharts = [];
   let basketChart = null;
+  let fetchProgressTimer = null;
+  let fetchProgressHideTimer = null;
+  let fetchProgressStart = null;
+  let fetchProgressAvgMs = 12000;
+
+  const FETCH_AVG_KEY = "btc_dashboard_fetch_avg_ms";
+  const FETCH_MIN_MS = 2000;
+  const FETCH_MAX_MS = 60000;
 
   const $ = (id) => document.getElementById(id);
 
@@ -357,6 +404,76 @@
   function destroyChartSafe(ch){
     if (ch && typeof ch.destroy === "function") ch.destroy();
     return null;
+  }
+
+  function getAvgFetchMs(){
+    const stored = Number(localStorage.getItem(FETCH_AVG_KEY));
+    if (Number.isFinite(stored) && stored >= FETCH_MIN_MS) return stored;
+    return fetchProgressAvgMs;
+  }
+
+  function updateAvgFetchMs(durationMs){
+    if (!Number.isFinite(durationMs)) return;
+    const clamped = Math.min(Math.max(durationMs, FETCH_MIN_MS), FETCH_MAX_MS);
+    const prev = Number(localStorage.getItem(FETCH_AVG_KEY));
+    const next = Number.isFinite(prev) ? Math.round(prev * 0.7 + clamped * 0.3) : Math.round(clamped);
+    localStorage.setItem(FETCH_AVG_KEY, next);
+  }
+
+  function startFetchProgress(){
+    const wrap = $("fetchProgress");
+    const bar = $("fetchProgressBar");
+    const meta = $("fetchProgressMeta");
+    if (!wrap || !bar || !meta) return;
+
+    if (fetchProgressTimer) clearInterval(fetchProgressTimer);
+    if (fetchProgressHideTimer) clearTimeout(fetchProgressHideTimer);
+
+    fetchProgressStart = Date.now();
+    fetchProgressAvgMs = getAvgFetchMs();
+
+    wrap.classList.add("active");
+    bar.style.width = "2%";
+
+    const tick = () => {
+      const elapsed = Date.now() - fetchProgressStart;
+      const remaining = Math.max(fetchProgressAvgMs - elapsed, 0);
+      const pct = Math.min((elapsed / fetchProgressAvgMs) * 100, 95);
+      bar.style.width = `${pct.toFixed(1)}%`;
+      if (remaining > 0) {
+        meta.innerHTML = `Fetching latest snapshot… <b>~${Math.ceil(remaining / 1000)}s remaining</b>`;
+      } else {
+        meta.innerHTML = "Fetching latest snapshot… <b>finalizing</b>";
+      }
+    };
+
+    tick();
+    fetchProgressTimer = setInterval(tick, 250);
+  }
+
+  function stopFetchProgress(durationMs, wasSuccessful){
+    const wrap = $("fetchProgress");
+    const bar = $("fetchProgressBar");
+    const meta = $("fetchProgressMeta");
+    if (!wrap || !bar || !meta) return;
+
+    if (fetchProgressTimer) clearInterval(fetchProgressTimer);
+    fetchProgressTimer = null;
+
+    if (wasSuccessful && Number.isFinite(durationMs)) {
+      updateAvgFetchMs(durationMs);
+      meta.innerHTML = `Latest snapshot loaded in <b>${(durationMs / 1000).toFixed(1)}s</b>`;
+    } else if (wasSuccessful) {
+      meta.innerHTML = "Latest snapshot loaded.";
+    } else {
+      meta.innerHTML = "Latest snapshot fetch stopped.";
+    }
+    bar.style.width = "100%";
+
+    fetchProgressHideTimer = setTimeout(() => {
+      wrap.classList.remove("active");
+      bar.style.width = "0%";
+    }, 1200);
   }
 
   function clearItemCharts(){
@@ -495,6 +612,9 @@
   async function fetchLatest(){
     setStatus("Fetching latest snapshot (cached 10 minutes)...");
     $("btnFetch").disabled = true;
+    startFetchProgress();
+    const fetchStart = Date.now();
+    let fetchSuccess = false;
 
     try{
       latest = await new Promise((resolve, reject) => {
@@ -514,11 +634,13 @@
         "Latest fetched: <b>" + new Date(latest.ts).toLocaleString() + "</b>" +
         (anyStale ? " — <span class='warn'>some prices are stale (fallback)</span>" : "")
       );
+      fetchSuccess = true;
 
     } catch (err) {
       setStatus("<b style='color:#fb7185'>Fetch failed:</b> " + escapeHtml(String(err)));
     } finally {
       $("btnFetch").disabled = false;
+      stopFetchProgress(Date.now() - fetchStart, fetchSuccess);
     }
   }
 
