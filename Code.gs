@@ -317,21 +317,29 @@ function getBasketInflation() {
   const hist = getBasketHistory();
   if (hist.length < 2) {
     return {
-      baselineTs: null, baselineUsd: null,
-      currentTs: null, currentUsd: null,
+      baselineTs: null, baselineUsd: null, baselineSats: null,
+      currentTs: null, currentUsd: null, currentSats: null,
+      inflationPctUsd: 0,
+      inflationPctSats: 0,
       inflationPct: 0
     };
   }
   const base = hist[0];
   const cur = hist[hist.length - 1];
-  const inflationPct = (base.basketIndexUsd && cur.basketIndexUsd)
+  const inflationPctUsd = (base.basketIndexUsd && cur.basketIndexUsd)
     ? ((cur.basketIndexUsd / base.basketIndexUsd) - 1) * 100 : 0;
+  const inflationPctSats = (base.basketIndexSats && cur.basketIndexSats)
+    ? ((cur.basketIndexSats / base.basketIndexSats) - 1) * 100 : 0;
   return {
     baselineTs: base.ts,
     baselineUsd: base.basketIndexUsd,
+    baselineSats: base.basketIndexSats,
     currentTs: cur.ts,
     currentUsd: cur.basketIndexUsd,
-    inflationPct: inflationPct
+    currentSats: cur.basketIndexSats,
+    inflationPctUsd: inflationPctUsd,
+    inflationPctSats: inflationPctSats,
+    inflationPct: inflationPctUsd
   };
 }
 
