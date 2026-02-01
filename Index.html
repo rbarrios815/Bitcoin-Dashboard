@@ -183,6 +183,38 @@
       letter-spacing:.35px;
       text-transform:uppercase;
     }
+    .vendor-list{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      margin:6px 0 12px;
+    }
+    .vendor-chip{
+      font-size:11px;
+      padding:3px 8px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.16);
+      background:rgba(0,0,0,.18);
+    }
+    .history-table{
+      width:100%;
+      border-collapse:collapse;
+      font-size:12px;
+      margin-top:6px;
+    }
+    .history-table th,
+    .history-table td{
+      padding:6px 8px;
+      border-bottom:1px solid rgba(255,255,255,.10);
+      text-align:left;
+    }
+    .history-table th{
+      color:var(--muted);
+      font-weight:800;
+      letter-spacing:.25px;
+      text-transform:uppercase;
+      font-size:11px;
+    }
   </style>
 </head>
 
@@ -253,6 +285,25 @@
         <div style="height:12px"></div>
         <div id="itemCharts"></div>
 
+        <div class="chart-title" style="margin-top:8px;">Vendors</div>
+        <div id="itemVendors" class="vendor-list"></div>
+
+        <div class="chart-title" style="margin-top:12px;">Historical records</div>
+        <div style="overflow-x:auto;">
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>Date/time</th>
+                <th>USD</th>
+                <th>Sats</th>
+                <th>Vendor</th>
+                <th>Stale</th>
+              </tr>
+            </thead>
+            <tbody id="itemHistoryRows"></tbody>
+          </table>
+        </div>
+
         <div class="note" id="itemNote"></div>
       </div>
     </div>
@@ -285,6 +336,12 @@
     if (Number.isNaN(dt.getTime())) return "—";
     return dt.toLocaleDateString();
   }
+  function fmtDateTime(d){
+    if (!d) return "—";
+    const dt = new Date(d);
+    if (Number.isNaN(dt.getTime())) return "—";
+    return dt.toLocaleString();
+  }
 
   function priceCompareClass(current, original){
     if (!isFinite(current) || !isFinite(original)) return "";
@@ -312,6 +369,14 @@
       .replaceAll(">","&gt;")
       .replaceAll('"',"&quot;")
       .replaceAll("'","&#039;");
+  }
+
+  function isValidVendor(source){
+    const cleaned = String(source || "").trim();
+    if (!cleaned) return false;
+    if (cleaned === "last_known" || cleaned === "cache") return false;
+    if (/^error:/i.test(cleaned)) return false;
+    return true;
   }
 
   function hexToRgba(hex, alpha){
@@ -622,6 +687,8 @@
       $("itemNote").innerHTML = staleCount
         ? `<span class='warn'>${staleCount} stale points</span>`
         : "Selected item first, then all other items, with the combined chart at the bottom.";
+      $("itemVendors").innerHTML = "<span class='badge'>Select a single item to see vendors</span>";
+      $("itemHistoryRows").innerHTML = "<tr><td colspan='5'>Select a single item to see detailed records.</td></tr>";
       return;
     }
 
@@ -641,6 +708,40 @@
 
     const canvas = createChartSection("", false);
     buildItemChart(canvas, hist);
+
+    const vendorSet = new Set();
+    hist.forEach(point => {
+      if (isValidVendor(point.price_source)) {
+        vendorSet.add(point.price_source);
+      }
+    });
+    const vendors = Array.from(vendorSet).sort();
+    const vendorRoot = $("itemVendors");
+    if (vendors.length) {
+      vendorRoot.innerHTML = vendors
+        .map(vendor => `<span class="vendor-chip">${escapeHtml(vendor)}</span>`)
+        .join("");
+    } else {
+      vendorRoot.innerHTML = "<span class='badge'>No vendor data yet</span>";
+    }
+
+    const rowsRoot = $("itemHistoryRows");
+    if (!hist.length) {
+      rowsRoot.innerHTML = "<tr><td colspan='5'>No history rows yet.</td></tr>";
+    } else {
+      rowsRoot.innerHTML = hist.map(point => {
+        const vendorLabel = isValidVendor(point.price_source) ? point.price_source : "—";
+        return `
+          <tr>
+            <td>${escapeHtml(fmtDateTime(point.ts))}</td>
+            <td>${escapeHtml(fmtUsd(point.usd))}</td>
+            <td>${escapeHtml(fmtSats(point.sats))}</td>
+            <td>${escapeHtml(vendorLabel)}</td>
+            <td>${point.is_stale ? "Yes" : "No"}</td>
+          </tr>
+        `;
+      }).join("");
+    }
   }
 
   async function renderBasket(){
