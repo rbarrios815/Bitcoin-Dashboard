@@ -877,6 +877,20 @@ function getItemDescription_(itemName, serpResult) {
   }
 
   const normalized = String(itemName || '').trim().toLowerCase();
+  const descriptionOverrides = {
+    apples: 'Honeycrisp apples 3 lb bag',
+    eggs: 'Grade A large eggs 12 count',
+    milk: 'Whole milk 1 gallon',
+    butter: 'Unsalted butter 16 oz',
+    bread: 'Sandwich bread 20 oz loaf',
+    rice: 'Long grain white rice 5 lb bag',
+    chicken: 'Boneless skinless chicken breast 2 lb',
+    'ground beef': 'Ground beef 80 20 1 lb',
+    potatoes: 'Russet potatoes 5 lb bag',
+    'yellow onions': 'Yellow onions 3 lb bag'
+  };
+  if (descriptionOverrides[normalized]) return descriptionOverrides[normalized];
+
   switch (normalized) {
     case 'honeycrisp apples 3 lb bag':
       return 'Fresh Honeycrisp apples, sweet and crisp, typically sold in 3 lb produce bags.';
