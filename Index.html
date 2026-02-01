@@ -158,6 +158,15 @@
     .good{ color: var(--good); font-weight:900; }
     .bad{ color: var(--bad); font-weight:900; }
     .warn{ color: var(--warn); font-weight:900; }
+    .first-available{
+      margin-top:6px;
+      font-size:12px;
+      color: var(--bad);
+      font-weight:800;
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
   </style>
 </head>
 
@@ -196,6 +205,10 @@
             <div class="label">Inflation vs baseline</div>
             <div class="val" id="infl">—</div>
           </div>
+        </div>
+        <div class="note">
+          Inflation vs baseline compares the latest basket index (USD) to your first recorded snapshot.
+          Positive means the basket costs more in USD than the baseline.
         </div>
 
         <div style="height:12px"></div>
@@ -239,6 +252,12 @@
     if (!isFinite(n)) return "—";
     return Math.round(n).toLocaleString() + " sats";
   }
+  function fmtDate(d){
+    if (!d) return "—";
+    const dt = new Date(d);
+    if (Number.isNaN(dt.getTime())) return "—";
+    return dt.toLocaleDateString();
+  }
 
   function destroyChartSafe(ch){
     if (ch && typeof ch.destroy === "function") ch.destroy();
@@ -254,10 +273,11 @@
       .replaceAll("'","&#039;");
   }
 
-  function getSourceUrl(row, item){
+  function getSourceUrl(row, item, description){
     if (row && row.source_url) return row.source_url;
-    if (item && item.query) {
-      return "https://www.google.com/search?tbm=shop&q=" + encodeURIComponent(item.query);
+    const q = description || (item && item.name) || (item && item.query) || "";
+    if (q) {
+      return "https://www.google.com/search?tbm=shop&q=" + encodeURIComponent(q);
     }
     return "";
   }
@@ -273,7 +293,11 @@
       const stale = Boolean(row?.is_stale);
       const source = row?.price_source || "";
       const description = row?.item_description || it.name;
-      const sourceUrl = getSourceUrl(row, it);
+      const sourceUrl = getSourceUrl(row, it, description);
+      const first = row?.first_available;
+      const firstDate = fmtDate(first?.ts);
+      const firstUsd = first?.usd != null ? fmtUsd(first.usd) : "—";
+      const firstSats = first?.sats != null ? fmtSats(first.sats) : "—";
 
       const div = document.createElement("div");
       div.className = "item" + (it.id === activeItemId ? " active" : "");
@@ -288,6 +312,10 @@
           <span>${usd != null ? fmtUsd(usd) : "—"}</span>
           <span>${sats != null ? fmtSats(sats) : "—"}</span>
           ${sourceUrl ? `<a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source</a>` : ""}
+        </div>
+        <div class="first-available">
+          <span>First: ${firstUsd} on ${firstDate}</span>
+          <span>First: ${firstSats} on ${firstDate}</span>
         </div>
       `;
       root.appendChild(div);

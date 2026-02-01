@@ -181,13 +181,22 @@ function fetchLatestSnapshot() {
     };
   });
 
+  const firstAvailableByDescription = sheet
+    ? getFirstAvailableByDescriptions_(priced.map(p => p.item_description), sheet)
+    : {};
+
+  const enriched = priced.map(item => {
+    const firstAvailable = firstAvailableByDescription[item.item_description] || null;
+    return Object.assign({}, item, { first_available: firstAvailable });
+  });
+
   const basketUsd = average_(priced.map(p => p.usd));
   const basketSats = average_(priced.map(p => p.sats));
 
   const out = {
     ts: new Date().toISOString(),
     btcUsd,
-    items: priced,
+    items: enriched,
     basketIndexUsd: basketUsd,
     basketIndexSats: basketSats
   };
@@ -571,6 +580,44 @@ function logSerpDebug_(url, resp, query) {
 /* =========================
    Last-known fallback
    ========================= */
+
+function getFirstAvailableByDescriptions_(descriptions, sheet) {
+  if (!sheet || !descriptions || !descriptions.length) return {};
+
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return {};
+
+  const header = values[0];
+  const idx = headerIndex_(header);
+  const desired = {};
+  descriptions.forEach(desc => {
+    const key = String(desc || '').trim();
+    if (key) desired[key] = true;
+  });
+
+  const out = {};
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const desc = String(row[idx.item_description] || '').trim();
+    if (!desc || !desired[desc]) continue;
+
+    const tsValue = row[idx.timestamp];
+    const ts = tsValue ? new Date(tsValue).toISOString() : null;
+    const usd = Number(row[idx.usd]);
+    const sats = Number(row[idx.sats]);
+    if (!ts || !isFinite(usd) || !isFinite(sats)) continue;
+
+    if (!out[desc]) {
+      out[desc] = { ts, usd, sats };
+      continue;
+    }
+
+    if (new Date(ts) < new Date(out[desc].ts)) {
+      out[desc] = { ts, usd, sats };
+    }
+  }
+  return out;
+}
 
 /**
  * Find the last known USD for an item description by searching upward. Used when providers are down.
