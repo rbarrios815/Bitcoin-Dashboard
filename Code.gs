@@ -121,6 +121,7 @@ function fetchLatestSnapshot() {
         id: it.id,
         name: it.name,
         query: it.query,
+        item_description: rr.description || '',
         usd: rr.usd,
         sats: sats,
         price_source: rr.source,
@@ -135,6 +136,7 @@ function fetchLatestSnapshot() {
         id: it.id,
         name: it.name,
         query: it.query,
+        item_description: sr.description || '',
         usd: sr.usd,
         sats: sats,
         price_source: sr.source,
@@ -150,6 +152,7 @@ function fetchLatestSnapshot() {
           id: it.id,
           name: it.name,
           query: it.query,
+          item_description: '',
           usd: last,
           sats: sats,
           price_source: 'last_known',
@@ -162,6 +165,7 @@ function fetchLatestSnapshot() {
       id: it.id,
       name: it.name,
       query: it.query,
+      item_description: '',
       usd: 0,
       sats: 0,
       price_source: (rr && rr.error) ? ('error:' + rr.error) : 'error',
@@ -204,6 +208,7 @@ function recordSnapshot() {
     it.id,                 // item_id
     it.name,               // item_name
     it.query,              // query
+    it.item_description,   // item_description
     it.usd,                // usd
     it.sats,               // sats
     snap.basketIndexUsd,   // basket_index_usd
@@ -330,7 +335,17 @@ function fetchItemsUsdRapidApiBatch_(items, props) {
     const key = cacheKeyForQuery_(it.query);
     const cached = cache.get(key);
     if (cached) {
-      byId[it.id] = { usd: Number(cached), source: 'cache' };
+      let cachedData = null;
+      try {
+        cachedData = JSON.parse(cached);
+      } catch (e) {
+        cachedData = null;
+      }
+      if (cachedData && isFinite(cachedData.usd)) {
+        byId[it.id] = { usd: Number(cachedData.usd), description: cachedData.description || '', source: 'cache' };
+      } else {
+        byId[it.id] = { usd: Number(cached), source: 'cache' };
+      }
     } else {
       toFetch.push({ it, key });
     }
@@ -375,10 +390,11 @@ function fetchItemsUsdRapidApiBatch_(items, props) {
 
       const data = JSON.parse(text);
       const price = extractLowestPrice_(data, props.maxResultsPerItem);
+      const description = extractItemDescription_(data, props.maxResultsPerItem);
 
       if (isFinite(price) && price > 0) {
-        cache.put(key, String(price), ttl);
-        byId[it.id] = { usd: price, source: 'rapidapi' };
+        cache.put(key, JSON.stringify({ usd: price, description: description }), ttl);
+        byId[it.id] = { usd: price, description: description, source: 'rapidapi' };
       } else {
         byId[it.id] = { error: 'rapidapi_no_price', source: 'rapidapi' };
       }
@@ -460,10 +476,11 @@ function fetchItemsUsdSerpApiBatch_(items, props) {
       }
 
       const price = Math.min.apply(null, candidates);
+      const description = extractItemDescription_(data, props.maxResultsPerItem);
       if (isFinite(price) && price > 0) {
         const key = cacheKeyForQuery_(it.query);
-        cache.put(key, String(price), ttl);
-        byId[it.id] = { usd: price, source: 'serpapi' };
+        cache.put(key, JSON.stringify({ usd: price, description: description }), ttl);
+        byId[it.id] = { usd: price, description: description, source: 'serpapi' };
       } else {
         byId[it.id] = { error: 'serpapi_bad_price', source: 'serpapi' };
       }
@@ -482,14 +499,14 @@ function fetchItemsUsdSerpApiBatch_(items, props) {
 /**
  * Find the last known USD for an itemId by searching upward. Used when providers are down.
  * Assumes your history sheet schema where:
- *   item_id is column 3, usd is column 6 (1-indexed)
+ *   item_id is column 3, usd is column 7 (1-indexed)
  */
 function getLastKnownUsd_(itemId, sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return null;
 
   const ITEM_ID_COL = 3;
-  const USD_COL = 6;
+  const USD_COL = 7;
 
   const chunkSize = 200;
   for (let end = lastRow; end >= 2; end -= chunkSize) {
@@ -563,7 +580,7 @@ function getOrCreateHistorySheet_(ss, name) {
   if (!sh) sh = ss.insertSheet(name);
 
   const desiredHeader = [
-    'timestamp', 'btc_usd', 'item_id', 'item_name', 'query', 'usd', 'sats',
+    'timestamp', 'btc_usd', 'item_id', 'item_name', 'query', 'item_description', 'usd', 'sats',
     'basket_index_usd', 'basket_index_sats', 'price_source', 'is_stale'
   ];
 
@@ -604,6 +621,7 @@ function headerIndex_(headerRow) {
     item_id: m.item_id,
     item_name: m.item_name,
     query: m.query,
+    item_description: m.item_description,
     usd: m.usd,
     sats: m.sats,
     basket_index_usd: m.basket_index_usd,
@@ -730,4 +748,27 @@ function extractLowestPrice_(data, maxInspect) {
 
   if (!candidates.length) throw new Error('Could not extract price from response');
   return Math.min.apply(null, candidates);
+}
+
+function extractItemDescription_(data, maxInspect) {
+  const arr = (Array.isArray(data) && data) ||
+    (Array.isArray(data.products) && data.products) ||
+    (Array.isArray(data.results) && data.results) ||
+    (Array.isArray(data.items) && data.items) ||
+    [];
+  const fields = [
+    'quantity', 'size', 'weight', 'unit', 'item_description', 'description',
+    'product_description', 'title', 'name'
+  ];
+
+  for (let i = 0; i < Math.min(arr.length, maxInspect); i++) {
+    const item = arr[i] || {};
+    for (let f = 0; f < fields.length; f++) {
+      const value = item[fields[f]];
+      if (value == null) continue;
+      const text = String(value).trim();
+      if (text) return text;
+    }
+  }
+  return '';
 }
