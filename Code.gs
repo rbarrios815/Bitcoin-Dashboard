@@ -1207,14 +1207,16 @@ function ensureCommodityItems_(items) {
   };
   addCommodity('gold', 'Gold');
   addCommodity('silver', 'Silver');
+  addCommodity('mwh', 'MWh');
   addCommodity('cash10', '$10');
 }
 
 function defaultQueryForItem_(itemName) {
   const normalized = String(itemName || '').trim().toLowerCase();
   const overrides = {
-    gold: '1 gram gold bar',
+    gold: '0.1 gram gold bar',
     silver: '1 gram silver bar',
+    mwh: '1 MWh electricity',
     'ground beef': 'ground beef 80/20 1 lb'
   };
   return overrides[normalized] || itemName;
@@ -1471,8 +1473,9 @@ function getStandardItemDescription_(itemName) {
     'ground beef': 'Ground beef 80 20 1 lb',
     potatoes: 'Russet potatoes 5 lb bag',
     'yellow onions': 'Yellow onions 3 lb bag',
-    gold: 'Gold 1 gram bar',
-    silver: 'Silver 1 gram bar'
+    gold: 'Gold 0.1 gram bar',
+    silver: 'Silver 1 gram bar',
+    mwh: 'Electricity 1 MWh'
   };
   if (descriptionOverrides[normalized]) return descriptionOverrides[normalized];
   return '';
@@ -1510,10 +1513,12 @@ function getItemDescription_(itemName, serpResult) {
       return 'Russet potatoes suitable for baking and frying, 5 lb bag.';
     case 'yellow onions 3 lb bag':
       return 'Yellow onions commonly used for cooking, 3 lb bag.';
-    case 'gold 1 gram bar':
-      return 'Gold bullion bar weighing approximately 1 gram.';
+    case 'gold 0.1 gram bar':
+      return 'Gold bullion bar weighing approximately 0.1 gram.';
     case 'silver 1 gram bar':
       return 'Silver bullion bar weighing approximately 1 gram.';
+    case 'electricity 1 mwh':
+      return 'Electricity energy quantity equivalent to 1 megawatt-hour.';
     default: {
       const fallback = String(itemName || '').trim();
       return fallback || 'Grocery item.';
