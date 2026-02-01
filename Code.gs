@@ -150,10 +150,10 @@ function fetchLatestSnapshot() {
     }
 
     if (props.allowStaleFallback && sheet) {
-      const last = getLastKnownUsd_(it.id, sheet);
+      const description = applyItemDescription_(it.name, null, null);
+      const last = getLastKnownUsd_(description, sheet);
       if (isFinite(last) && last > 0) {
         const sats = usdToSats_(last, btcUsd);
-        const description = applyItemDescription_(it.name, null, null);
         return {
           id: it.id,
           name: it.name,
@@ -213,9 +213,9 @@ function recordSnapshot() {
   const rows = snap.items.map(it => ([
     ts,                    // timestamp
     snap.btcUsd,           // btc_usd
-    it.id,                 // item_id
-    it.name,               // item_name
-    it.query,              // query
+    '',                    // item_id (deprecated)
+    '',                    // item_name (deprecated)
+    '',                    // query (deprecated)
     it.item_description,   // item_description
     it.usd,                // usd
     it.sats,               // sats
@@ -244,7 +244,7 @@ function getConfig() {
   };
 }
 
-function getItemHistory(itemId) {
+function getItemHistory(itemDescription) {
   const props = getProps_();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(props.dataSheetName);
@@ -257,9 +257,11 @@ function getItemHistory(itemId) {
   const idx = headerIndex_(header);
   const out = [];
 
+  const targetDescription = String(itemDescription || '').trim();
   for (let r = 1; r < values.length; r++) {
     const row = values[r];
-    if (String(row[idx.item_id]) !== String(itemId)) continue;
+    const rowDescription = String(row[idx.item_description] || '').trim();
+    if (!rowDescription || rowDescription !== targetDescription) continue;
     out.push({
       ts: new Date(row[idx.timestamp]).toISOString(),
       usd: Number(row[idx.usd]),
@@ -571,24 +573,24 @@ function logSerpDebug_(url, resp, query) {
    ========================= */
 
 /**
- * Find the last known USD for an itemId by searching upward. Used when providers are down.
+ * Find the last known USD for an item description by searching upward. Used when providers are down.
  * Assumes your history sheet schema where:
- *   item_id is column 3, usd is column 7 (1-indexed)
+ *   item_description is column 6, usd is column 7 (1-indexed)
  */
 function getLastKnownUsd_(itemId, sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return null;
 
-  const ITEM_ID_COL = 3;
+  const ITEM_DESCRIPTION_COL = 6;
   const USD_COL = 7;
 
   const chunkSize = 200;
   for (let end = lastRow; end >= 2; end -= chunkSize) {
     const start = Math.max(2, end - chunkSize + 1);
-    const values = sheet.getRange(start, 1, end - start + 1, Math.max(USD_COL, ITEM_ID_COL)).getValues();
+    const values = sheet.getRange(start, 1, end - start + 1, Math.max(USD_COL, ITEM_DESCRIPTION_COL)).getValues();
     for (let i = values.length - 1; i >= 0; i--) {
       const row = values[i];
-      if (String(row[ITEM_ID_COL - 1]) === String(itemId)) {
+      if (String(row[ITEM_DESCRIPTION_COL - 1]) === String(itemId)) {
         const usd = Number(row[USD_COL - 1]);
         if (isFinite(usd) && usd > 0) return usd;
       }
