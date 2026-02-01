@@ -376,6 +376,8 @@
                 <th id="historyCommodityLabel">Commodity</th>
                 <th>USD</th>
                 <th>Sats</th>
+                <th>Gold (g)</th>
+                <th>Silver (g)</th>
                 <th>Vendor</th>
                 <th>Provider</th>
                 <th>Source URL</th>
@@ -731,13 +733,13 @@
     });
   }
 
-  async function ensureCommodityReferences(){
+  async function ensureCommodityReferences(includeMetals = false){
     if (!referenceHistory.basket.length) {
       referenceHistory.basket = await new Promise((resolve, reject) => {
         google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getBasketHistory();
       });
     }
-    if (commodityMode === "gold" || commodityMode === "silver") {
+    if (includeMetals || commodityMode === "gold" || commodityMode === "silver") {
       if (!referenceHistory.gold.length && !referenceHistory.silver.length) {
         await loadCommodityHistories();
       }
@@ -1041,6 +1043,7 @@
 
     itemViewMode = $("itemViewMode")?.value || "selected";
     clearItemCharts();
+    await ensureCommodityReferences(true);
 
     if (itemViewMode === "all") {
       const selectedItem = cfg.items.find(x => x.id === activeItemId);
@@ -1075,7 +1078,7 @@
         ? `<span class='warn'>${staleCount} stale points</span>`
         : "Selected item first, then all other items, with the combined chart at the bottom.";
       $("itemVendors").innerHTML = "<span class='badge'>Select a single item to see vendors</span>";
-      $("itemHistoryRows").innerHTML = "<tr><td colspan='8'>Select a single item to see detailed records.</td></tr>";
+      $("itemHistoryRows").innerHTML = "<tr><td colspan='10'>Select a single item to see detailed records.</td></tr>";
       return;
     }
 
@@ -1118,7 +1121,7 @@
 
     const rowsRoot = $("itemHistoryRows");
     if (!hist.length) {
-      rowsRoot.innerHTML = "<tr><td colspan='8'>No history rows yet.</td></tr>";
+      rowsRoot.innerHTML = "<tr><td colspan='10'>No history rows yet.</td></tr>";
     } else {
       const orderedHistory = [...hist].sort((a, b) => new Date(b.ts) - new Date(a.ts));
       rowsRoot.innerHTML = orderedHistory.map(point => {
@@ -1126,12 +1129,16 @@
         const providerLabel = point.price_source ? point.price_source : "—";
         const sourceUrl = hasSourceUrl(point) ? point.source_url : "";
         const commodityValue = getCommodityValue(Number(point.usd), Number(point.sats), point.ts);
+        const goldValue = getCommodityValueForMode("gold", Number(point.usd), Number(point.sats), point.ts);
+        const silverValue = getCommodityValueForMode("silver", Number(point.usd), Number(point.sats), point.ts);
         return `
           <tr>
             <td>${escapeHtml(fmtDateTime(point.ts))}</td>
             <td>${escapeHtml(fmtCommodity(commodityValue))}</td>
             <td>${escapeHtml(fmtUsd(point.usd))}</td>
             <td>${escapeHtml(fmtSats(point.sats))}</td>
+            <td>${escapeHtml(fmtCommodityForMode(goldValue, "gold"))}</td>
+            <td>${escapeHtml(fmtCommodityForMode(silverValue, "silver"))}</td>
             <td>${escapeHtml(vendorLabel)}</td>
             <td>${escapeHtml(providerLabel)}</td>
             <td>${sourceUrl ? `<a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source</a>` : "—"}</td>
