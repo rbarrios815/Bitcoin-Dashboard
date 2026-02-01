@@ -207,7 +207,7 @@
             <div class="val" id="btcUsd">—</div>
           </div>
           <div class="kpi">
-            <div class="label">Inflation vs baseline</div>
+            <div class="label">Inflation vs baseline (USD)</div>
             <div class="val" id="infl">—</div>
           </div>
           <div class="kpi">
@@ -351,7 +351,7 @@
           ${sourceUrl ? `<a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source</a>` : ""}
         </div>
         <div class="first-available">
-          <span>Earliest: ${firstUsd} and ${firstSats} on ${firstDate}</span>
+          <span>Earliest: ${firstUsd} / ${firstSats} on ${firstDate}</span>
         </div>
       `;
       root.appendChild(div);
