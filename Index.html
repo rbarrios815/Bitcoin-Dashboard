@@ -239,6 +239,8 @@
         <div class="note">
           “Fetch Latest” updates the UI (cached 10 min). “Record Snapshot” writes permanent history.
           If the provider is down, the app may show <span class="warn">stale</span> last-known prices.
+          Prices without a provider URL are marked <span class="warn">unverified</span> so you can tell when a source link is missing.
+          If cache/stale fallback is disabled, unverified rows will show no source link instead of fallback values.
         </div>
       </div>
 
@@ -297,6 +299,8 @@
                 <th>USD</th>
                 <th>Sats</th>
                 <th>Vendor</th>
+                <th>Provider</th>
+                <th>Source URL</th>
                 <th>Stale</th>
               </tr>
             </thead>
@@ -379,6 +383,10 @@
     return true;
   }
 
+  function hasSourceUrl(row){
+    return Boolean(row && String(row.source_url || "").trim());
+  }
+
   function hexToRgba(hex, alpha){
     const clean = String(hex || "").replace("#", "");
     if (clean.length !== 6) return `rgba(255,255,255,${alpha})`;
@@ -389,12 +397,8 @@
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
-  function getSourceUrl(row, item, description){
+  function getSourceUrl(row){
     if (row && row.source_url) return row.source_url;
-    const q = description || (item && item.name) || (item && item.query) || "";
-    if (q) {
-      return "https://www.google.com/search?tbm=shop&q=" + encodeURIComponent(q);
-    }
     return "";
   }
 
@@ -410,7 +414,7 @@
       const source = row?.price_source || "";
       const vendor = row?.price_vendor || "";
       const description = row?.item_description || it.name;
-      const sourceUrl = getSourceUrl(row, it, description);
+      const sourceUrl = getSourceUrl(row);
       const first = row?.first_available;
       const firstDate = fmtDate(first?.ts);
       const firstUsd = first?.usd != null ? fmtUsd(first.usd) : "—";
@@ -418,12 +422,15 @@
       const vendorCount = Number.isFinite(row?.vendor_count) ? row.vendor_count : 0;
       const usdClass = priceCompareClass(usd, first?.usd);
       const satsClass = priceCompareClass(sats, first?.sats);
+      const isUnverified = !stale && !hasSourceUrl(row);
+      const latestTs = latest?.ts ? fmtDateTime(latest.ts) : "—";
 
       const div = document.createElement("div");
       div.className = "item" + (it.id === activeItemId ? " active" : "");
       div.onclick = () => selectItem(it.id);
 
       const badge = stale ? `<span class="badge stale">STALE</span>` :
+                   isUnverified ? `<span class="badge stale">UNVERIFIED</span>` :
                    vendor ? `<span class="badge">${escapeHtml(vendor)}</span>` :
                    source ? `<span class="badge">${escapeHtml(source)}</span>` : "";
 
@@ -431,7 +438,9 @@
         <div class="name">${escapeHtml(description)} ${badge}</div>
         <div class="meta">
           <span>Latest: <span class="${usdClass}">${usd != null ? fmtUsd(usd) : "—"}</span> / <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span></span>
-          ${sourceUrl ? `<a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Sources</a>` : ""}
+          <span>Provider: ${escapeHtml(source || "—")}</span>
+          <span>As of: ${escapeHtml(latestTs)}</span>
+          ${sourceUrl ? `<a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source URL</a>` : "<span>No source URL</span>"}
         </div>
         <div class="first-available">
           <span>Earliest: ${firstUsd} / ${firstSats} on ${firstDate}</span>
@@ -689,7 +698,7 @@
         ? `<span class='warn'>${staleCount} stale points</span>`
         : "Selected item first, then all other items, with the combined chart at the bottom.";
       $("itemVendors").innerHTML = "<span class='badge'>Select a single item to see vendors</span>";
-      $("itemHistoryRows").innerHTML = "<tr><td colspan='5'>Select a single item to see detailed records.</td></tr>";
+      $("itemHistoryRows").innerHTML = "<tr><td colspan='7'>Select a single item to see detailed records.</td></tr>";
       return;
     }
 
@@ -704,8 +713,12 @@
     const staleCount = hist.filter(x => x.is_stale).length;
 
     $("itemTitle").textContent = description;
-    $("itemNote").innerHTML =
-      (staleCount ? ("<span class='warn'>" + staleCount + " stale points</span>") : "");
+    const unverifiedCount = hist.filter(point => !point.is_stale && !hasSourceUrl(point)).length;
+    const notes = [];
+    if (staleCount) notes.push("<span class='warn'>" + staleCount + " stale points</span>");
+    if (unverifiedCount) notes.push("<span class='warn'>" + unverifiedCount + " unverified (no source URL)</span>");
+    notes.push("Cache/stale fallback is only used when enabled; otherwise missing providers show as unverified with no URL.");
+    $("itemNote").innerHTML = notes.join(" • ");
 
     const canvas = createChartSection("", false);
     buildItemChart(canvas, hist);
@@ -728,16 +741,21 @@
 
     const rowsRoot = $("itemHistoryRows");
     if (!hist.length) {
-      rowsRoot.innerHTML = "<tr><td colspan='5'>No history rows yet.</td></tr>";
+      rowsRoot.innerHTML = "<tr><td colspan='7'>No history rows yet.</td></tr>";
     } else {
-      rowsRoot.innerHTML = hist.map(point => {
+      const orderedHistory = [...hist].sort((a, b) => new Date(b.ts) - new Date(a.ts));
+      rowsRoot.innerHTML = orderedHistory.map(point => {
         const vendorLabel = isValidVendor(point.price_vendor) ? point.price_vendor : "—";
+        const providerLabel = point.price_source ? point.price_source : "—";
+        const sourceUrl = hasSourceUrl(point) ? point.source_url : "";
         return `
           <tr>
             <td>${escapeHtml(fmtDateTime(point.ts))}</td>
             <td>${escapeHtml(fmtUsd(point.usd))}</td>
             <td>${escapeHtml(fmtSats(point.sats))}</td>
             <td>${escapeHtml(vendorLabel)}</td>
+            <td>${escapeHtml(providerLabel)}</td>
+            <td>${sourceUrl ? `<a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source</a>` : "—"}</td>
             <td>${point.is_stale ? "Yes" : "No"}</td>
           </tr>
         `;

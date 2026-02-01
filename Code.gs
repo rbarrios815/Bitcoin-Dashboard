@@ -241,6 +241,7 @@ function recordSnapshot() {
     snap.basketIndexSats,  // basket_index_sats
     it.price_source,       // price_source
     it.price_vendor,       // price_vendor
+    it.source_url,         // source_url
     it.is_stale            // is_stale
   ]));
 
@@ -336,7 +337,7 @@ function getLatestSnapshotFromSheet() {
     }
     const rowItemId = idx.item_id != null ? String(row[idx.item_id] || '').trim() : '';
     const rowItemName = idx.item_name != null ? String(row[idx.item_name] || '').trim() : '';
-    const rowDetails = {
+      const rowDetails = {
       ts,
       item_id: rowItemId,
       item_name: rowItemName,
@@ -345,6 +346,7 @@ function getLatestSnapshotFromSheet() {
       sats: Number(row[idx.sats]),
       price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
       price_vendor: idx.price_vendor != null ? String(row[idx.price_vendor] || '') : '',
+      source_url: idx.source_url != null ? String(row[idx.source_url] || '') : '',
       is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false
     };
     if (!latestByDescription[normalized] || ts > latestByDescription[normalized].ts) {
@@ -410,7 +412,7 @@ function getLatestSnapshotFromSheet() {
       item_description: description,
       usd: latestRow ? latestRow.usd : 0,
       sats: latestRow ? latestRow.sats : 0,
-      source_url: '',
+      source_url: latestRow ? latestRow.source_url : '',
       price_source: latestRow ? latestRow.price_source : '',
       price_vendor: latestRow ? latestRow.price_vendor : '',
       is_stale: latestRow ? latestRow.is_stale : true,
@@ -459,6 +461,7 @@ function getItemHistory(itemDescription) {
       btcUsd: Number(row[idx.btc_usd]),
       price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
       price_vendor: idx.price_vendor != null ? String(row[idx.price_vendor] || '') : '',
+      source_url: idx.source_url != null ? String(row[idx.source_url] || '') : '',
       is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false
     });
   }
@@ -509,6 +512,7 @@ function getAllItemHistories(itemDescriptions) {
       btcUsd: Number(row[idx.btc_usd]),
       price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
       price_vendor: idx.price_vendor != null ? String(row[idx.price_vendor] || '') : '',
+      source_url: idx.source_url != null ? String(row[idx.source_url] || '') : '',
       is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false
     });
   }
@@ -1019,7 +1023,7 @@ function getOrCreateHistorySheet_(ss, name) {
 
   const desiredHeader = [
     'timestamp', 'btc_usd', 'item_id', 'item_name', 'query', 'item_description', 'usd', 'sats',
-    'basket_index_usd', 'basket_index_sats', 'price_source', 'price_vendor', 'is_stale'
+    'basket_index_usd', 'basket_index_sats', 'price_source', 'price_vendor', 'source_url', 'is_stale'
   ];
 
   if (sh.getLastRow() === 0) {
@@ -1067,6 +1071,7 @@ function headerIndex_(headerRow) {
     basket_index_sats: m.basket_index_sats,
     price_source: m.price_source !== undefined ? m.price_source : null,
     price_vendor: m.price_vendor !== undefined ? m.price_vendor : null,
+    source_url: m.source_url !== undefined ? m.source_url : null,
     is_stale: m.is_stale !== undefined ? m.is_stale : null
   };
 }
