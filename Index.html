@@ -403,7 +403,7 @@
     $("infl").innerHTML = `<span class="${cls}">${pct.toFixed(2)}%</span>`;
 
     const labels = hist.map(p => new Date(p.ts).toLocaleDateString());
-    const usd = hist.map(p => Number(p.basketIndexUsd));
+    const usd = hist.map(p => Number(p.basketIndexUsd) * 1000);
     const sats = hist.map(p => Number(p.basketIndexSats));
 
     basketChart = destroyChartSafe(basketChart);
@@ -414,7 +414,7 @@
       data: {
         labels,
         datasets: [
-          { label: "Basket Index (USD)", data: usd, borderWidth: 2, tension: 0.25, pointRadius: 2 },
+          { label: "Basket Index (USD x1000)", data: usd, borderWidth: 2, tension: 0.25, pointRadius: 2 },
           { label: "Basket Index (sats)", data: sats, borderWidth: 2, tension: 0.25, pointRadius: 2 }
         ]
       },
