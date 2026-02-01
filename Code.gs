@@ -23,6 +23,7 @@
  *   SERPAPI_ENGINE - (optional) defaults to 'google_shopping'
  *   SERPAPI_LOCATION - (optional) location string (e.g. 'Austin, TX, USA')
  *   SERPAPI_NO_CACHE - (optional) 'true' to bypass SerpAPI cache
+ *   SERP_DEBUG - (optional) 'true' to log SerpAPI debug output
  ************************/
 
 /* =========================
@@ -439,10 +440,15 @@ function fetchItemsUsdSerpApiBatch_(items, props) {
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     const resp = responses[i];
+    const requestUrl = requests[i].url;
 
     try {
       const code = resp.getResponseCode();
       const text = resp.getContentText() || '';
+
+      if (props.serpDebug) {
+        logSerpDebug_(requestUrl, resp);
+      }
 
       if (code >= 400) {
         byId[it.id] = { error: `serpapi_${code}`, source: 'serpapi' };
@@ -490,6 +496,46 @@ function fetchItemsUsdSerpApiBatch_(items, props) {
   }
 
   return byId;
+}
+
+/**
+ * Run exactly one SerpAPI request for a query and log debug output if enabled.
+ * Does not write to sheets.
+ */
+function runSerpDebugOnce(itemQuery) {
+  const props = getProps_();
+  if (!props.serpApiKey) throw new Error('Missing Script Property: SERPAPI_KEY');
+  const engine = props.serpApiEngine || 'google_shopping';
+  const query = encodeURIComponent(itemQuery || '');
+  let url = 'https://serpapi.com/search?engine=' + encodeURIComponent(engine) +
+    '&q=' + query +
+    '&api_key=' + encodeURIComponent(props.serpApiKey) +
+    '&num=10';
+
+  if (props.serpApiLocation) url += '&location=' + encodeURIComponent(props.serpApiLocation);
+  if (String(props.serpApiNoCache).toLowerCase() === 'true') url += '&no_cache=true';
+
+  const resp = UrlFetchApp.fetch(url, { method: 'get', muteHttpExceptions: true });
+  if (props.serpDebug) {
+    logSerpDebug_(url, resp);
+  } else {
+    Logger.log('SERP_DEBUG is false; no SerpAPI debug output will be logged.');
+  }
+}
+
+function logSerpDebug_(url, resp) {
+  const code = resp.getResponseCode();
+  const raw = resp.getContentText() || '';
+  Logger.log('SERP_DEBUG status: %s', code);
+  Logger.log('SERP_DEBUG url: %s', redactSecrets_(url));
+  Logger.log('SERP_DEBUG raw(0-5000): %s', redactSecrets_(raw.slice(0, 5000)));
+  try {
+    const parsed = JSON.parse(raw);
+    const pretty = JSON.stringify(parsed, null, 2);
+    Logger.log('SERP_DEBUG json: %s', redactSecrets_(pretty));
+  } catch (e) {
+    Logger.log('SERP_DEBUG json parse error: %s', e && e.message ? e.message : String(e));
+  }
 }
 
 /* =========================
@@ -655,7 +701,8 @@ function getProps_() {
     serpApiKey: sp.getProperty('SERPAPI_KEY') || '',
     serpApiEngine: sp.getProperty('SERPAPI_ENGINE') || '',
     serpApiLocation: sp.getProperty('SERPAPI_LOCATION') || '',
-    serpApiNoCache: sp.getProperty('SERPAPI_NO_CACHE') || ''
+    serpApiNoCache: sp.getProperty('SERPAPI_NO_CACHE') || '',
+    serpDebug: String(sp.getProperty('SERP_DEBUG') || 'false').toLowerCase() === 'true'
   };
 }
 
@@ -700,6 +747,17 @@ function title_(s) {
 function addParam_(url, k, v) {
   const sep = url.includes('?') ? '&' : '?';
   return url + sep + encodeURIComponent(k) + '=' + encodeURIComponent(v);
+}
+function redactSecrets_(text) {
+  if (text == null) return text;
+  let out = String(text);
+  out = out.replace(/([?&]api_key=)[^&\s]+/gi, '$1REDACTED');
+  out = out.replace(/(api_key["']?\s*[:=]\s*["']?)([^"'\s,}]+)/gi, '$1REDACTED');
+  out = out.replace(/(X-RapidAPI-Key["']?\s*[:=]\s*["']?)([^"'\s,}]+)/gi, '$1REDACTED');
+  out = out.replace(/(Authorization["']?\s*[:=]\s*["']?)([^"'\s,}]+)/gi, '$1REDACTED');
+  out = out.replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer REDACTED');
+  out = out.replace(/(token["']?\s*[:=]\s*["']?)([^"'\s,}]+)/gi, '$1REDACTED');
+  return out;
 }
 function average_(arr) {
   const nums = arr.map(Number).filter(n => isFinite(n));
