@@ -184,11 +184,15 @@ function fetchLatestSnapshot() {
   const firstAvailableByDescription = sheet
     ? getFirstAvailableByDescriptions_(priced.map(p => p.item_description), sheet)
     : {};
+  const vendorCountsByDescription = sheet
+    ? getVendorCountsByDescriptions_(priced.map(p => p.item_description), sheet)
+    : {};
 
   const enriched = priced.map(item => {
     const normalized = normalizeDescription_(item.item_description);
     const firstAvailable = firstAvailableByDescription[normalized] || null;
-    return Object.assign({}, item, { first_available: firstAvailable });
+    const vendorCount = vendorCountsByDescription[normalized] || 0;
+    return Object.assign({}, item, { first_available: firstAvailable, vendor_count: vendorCount });
   });
 
   const basketUsd = average_(priced.map(p => p.usd));
@@ -282,7 +286,8 @@ function getLatestSnapshotFromSheet() {
         source_url: '',
         price_source: '',
         is_stale: true,
-        first_available: null
+        first_available: null,
+        vendor_count: 0
       })),
       basketIndexUsd: 0,
       basketIndexSats: 0
@@ -295,6 +300,7 @@ function getLatestSnapshotFromSheet() {
 
   const latestByDescription = {};
   const earliestByDescription = {};
+  const vendorCountsByDescription = {};
   const latestById = {};
   const earliestById = {};
   const latestByName = {};
@@ -314,6 +320,13 @@ function getLatestSnapshotFromSheet() {
     if (!ts || Number.isNaN(ts.getTime())) continue;
 
     const normalized = normalizeDescription_(desc);
+    const rowPriceSource = idx.price_source != null ? String(row[idx.price_source] || '').trim() : '';
+    if (normalized) {
+      if (!vendorCountsByDescription[normalized]) vendorCountsByDescription[normalized] = {};
+      if (rowPriceSource && rowPriceSource !== 'last_known' && rowPriceSource !== 'cache' && !/^error:/i.test(rowPriceSource)) {
+        vendorCountsByDescription[normalized][rowPriceSource] = true;
+      }
+    }
     const rowItemId = idx.item_id != null ? String(row[idx.item_id] || '').trim() : '';
     const rowItemName = idx.item_name != null ? String(row[idx.item_name] || '').trim() : '';
     const rowDetails = {
@@ -394,7 +407,10 @@ function getLatestSnapshotFromSheet() {
       is_stale: latestRow ? latestRow.is_stale : true,
       first_available: earliestRow
         ? { ts: new Date(earliestRow.ts).toISOString(), usd: earliestRow.usd, sats: earliestRow.sats }
-        : null
+        : null,
+      vendor_count: vendorCountsByDescription[normalized]
+        ? Object.keys(vendorCountsByDescription[normalized]).length
+        : 0
     };
   });
 
@@ -838,6 +854,46 @@ function getFirstAvailableByDescriptions_(descriptions, sheet) {
     }
   }
   return out;
+}
+
+function getVendorCountsByDescriptions_(descriptions, sheet) {
+  if (!sheet || !descriptions || !descriptions.length) return {};
+
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return {};
+
+  const header = values[0];
+  const idx = headerIndex_(header);
+  if (idx.price_source == null) return {};
+
+  const desired = {};
+  descriptions.forEach(desc => {
+    const key = normalizeDescription_(String(desc || '').trim());
+    if (key) desired[key] = true;
+  });
+
+  const out = {};
+
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const rowDescription = String(row[idx.item_description] || '').trim();
+    if (!rowDescription) continue;
+    const normalized = normalizeDescription_(rowDescription);
+    if (!desired[normalized]) continue;
+    const rowPriceSource = String(row[idx.price_source] || '').trim();
+    if (!rowPriceSource || rowPriceSource === 'last_known' || rowPriceSource === 'cache' || /^error:/i.test(rowPriceSource)) {
+      continue;
+    }
+    if (!out[normalized]) out[normalized] = {};
+    out[normalized][rowPriceSource] = true;
+  }
+
+  const counts = {};
+  Object.keys(out).forEach(key => {
+    counts[key] = Object.keys(out[key]).length;
+  });
+
+  return counts;
 }
 
 /**
