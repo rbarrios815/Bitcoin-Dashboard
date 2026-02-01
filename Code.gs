@@ -301,20 +301,28 @@ function getLatestSnapshotFromSheet() {
   }, {});
 
   if (!sheet || sheet.getLastRow() < 2) {
+    let fallbackBtcUsd = null;
+    try {
+      fallbackBtcUsd = fetchBtcUsd_(props);
+    } catch (e) {
+      fallbackBtcUsd = null;
+    }
     return {
       ts: null,
-      btcUsd: null,
+      btcUsd: isFinite(fallbackBtcUsd) ? fallbackBtcUsd : null,
       items: items.map(it => ({
         id: it.id,
         name: it.name,
         query: it.query,
         item_description: applyItemDescription_(it.name, null, null),
-        usd: 0,
-        sats: 0,
+        usd: it.id === 'cash10' ? 10 : 0,
+        sats: it.id === 'cash10' && isFinite(fallbackBtcUsd)
+          ? usdToSats_(10, fallbackBtcUsd)
+          : 0,
         source_url: '',
-        price_source: '',
+        price_source: it.id === 'cash10' ? 'fixed' : '',
         price_vendor: '',
-        is_stale: true,
+        is_stale: it.id === 'cash10' ? false : true,
         first_available: null,
         vendor_count: 0
       })),
@@ -427,6 +435,28 @@ function getLatestSnapshotFromSheet() {
       || earliestByDescription[normalized]
       || null;
     const description = latestRow?.item_description || fallbackDescription;
+    if (it.id === 'cash10') {
+      const cashSats = isFinite(latestBtcUsd) ? usdToSats_(10, latestBtcUsd) : 0;
+      return {
+        id: it.id,
+        name: it.name,
+        query: it.query,
+        item_description: description,
+        ts: latestTs ? latestTs.toISOString() : null,
+        usd: 10,
+        sats: cashSats,
+        source_url: '',
+        price_source: 'fixed',
+        price_vendor: '',
+        is_stale: false,
+        first_available: earliestRow
+          ? { ts: new Date(earliestRow.ts).toISOString(), usd: earliestRow.usd, sats: earliestRow.sats }
+          : null,
+        vendor_count: vendorCountsByDescription[normalized]
+          ? Object.keys(vendorCountsByDescription[normalized]).length
+          : 0
+      };
+    }
     return {
       id: it.id,
       name: it.name,
