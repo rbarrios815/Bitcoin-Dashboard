@@ -223,9 +223,9 @@ function recordSnapshot() {
   const rows = snap.items.map(it => ([
     ts,                    // timestamp
     snap.btcUsd,           // btc_usd
-    '',                    // item_id (deprecated)
-    '',                    // item_name (deprecated)
-    '',                    // query (deprecated)
+    it.id,                 // item_id
+    it.name,               // item_name
+    it.query,              // query
     it.item_description,   // item_description
     it.usd,                // usd
     it.sats,               // sats
@@ -289,6 +289,10 @@ function getLatestSnapshotFromSheet() {
 
   const latestByDescription = {};
   const earliestByDescription = {};
+  const latestById = {};
+  const earliestById = {};
+  const latestByName = {};
+  const earliestByName = {};
   let latestTs = null;
   let latestBasketUsd = null;
   let latestBasketSats = null;
@@ -304,19 +308,42 @@ function getLatestSnapshotFromSheet() {
     if (!ts || Number.isNaN(ts.getTime())) continue;
 
     const normalized = normalizeDescription_(desc);
+    const rowItemId = idx.item_id != null ? String(row[idx.item_id] || '').trim() : '';
+    const rowItemName = idx.item_name != null ? String(row[idx.item_name] || '').trim() : '';
+    const rowDetails = {
+      ts,
+      item_description: desc,
+      usd: Number(row[idx.usd]),
+      sats: Number(row[idx.sats]),
+      price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
+      is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false
+    };
     if (!latestByDescription[normalized] || ts > latestByDescription[normalized].ts) {
-      latestByDescription[normalized] = {
-        ts,
-        item_description: desc,
-        usd: Number(row[idx.usd]),
-        sats: Number(row[idx.sats]),
-        price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
-        is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false
-      };
+      latestByDescription[normalized] = rowDetails;
+    }
+    if (rowItemId && (!latestById[rowItemId] || ts > latestById[rowItemId].ts)) {
+      latestById[rowItemId] = rowDetails;
+    }
+    if (rowItemName && (!latestByName[rowItemName] || ts > latestByName[rowItemName].ts)) {
+      latestByName[rowItemName] = rowDetails;
     }
 
     if (!earliestByDescription[normalized] || ts < earliestByDescription[normalized].ts) {
       earliestByDescription[normalized] = {
+        ts,
+        usd: Number(row[idx.usd]),
+        sats: Number(row[idx.sats])
+      };
+    }
+    if (rowItemId && (!earliestById[rowItemId] || ts < earliestById[rowItemId].ts)) {
+      earliestById[rowItemId] = {
+        ts,
+        usd: Number(row[idx.usd]),
+        sats: Number(row[idx.sats])
+      };
+    }
+    if (rowItemName && (!earliestByName[rowItemName] || ts < earliestByName[rowItemName].ts)) {
+      earliestByName[rowItemName] = {
         ts,
         usd: Number(row[idx.usd]),
         sats: Number(row[idx.sats])
@@ -334,8 +361,8 @@ function getLatestSnapshotFromSheet() {
   const payloadItems = items.map(it => {
     const fallbackDescription = applyItemDescription_(it.name, null, null);
     const normalized = normalizeDescription_(fallbackDescription);
-    const latestRow = latestByDescription[normalized] || null;
-    const earliestRow = earliestByDescription[normalized] || null;
+    const latestRow = latestById[it.id] || latestByName[it.name] || latestByDescription[normalized] || null;
+    const earliestRow = earliestById[it.id] || earliestByName[it.name] || earliestByDescription[normalized] || null;
     const description = latestRow?.item_description || fallbackDescription;
     return {
       id: it.id,
