@@ -781,7 +781,7 @@ function fetchItemsUsdSerpApiBatch_(items, props) {
         continue;
       }
 
-      const price = Math.min.apply(null, candidates);
+      const price = median_(candidates);
       const serpResultForDescription = getSerpResultForDescription_(results);
       const description = applyItemDescription_(it.name, null, serpResultForDescription);
       const sourceUrl = extractSerpSourceUrl_(results);
@@ -1195,6 +1195,13 @@ function average_(arr) {
   if (!nums.length) return 0;
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
+function median_(arr) {
+  const nums = arr.map(Number).filter(n => isFinite(n)).sort((a, b) => a - b);
+  if (!nums.length) return 0;
+  const mid = Math.floor(nums.length / 2);
+  if (nums.length % 2) return nums[mid];
+  return (nums[mid - 1] + nums[mid]) / 2;
+}
 function usdToSats_(usd, btcUsd) { return (usd / btcUsd) * 100000000; }
 function num_(v) {
   if (v == null) return NaN;
@@ -1203,7 +1210,7 @@ function num_(v) {
 }
 
 /**
- * Generic "lowest price" extraction. Works with many common RapidAPI shopping schemas.
+ * Generic "median price" extraction. Works with many common RapidAPI shopping schemas.
  * If your provider schema differs, paste one response and we can tighten this.
  */
 function extractLowestPrice_(data, maxInspect) {
@@ -1236,7 +1243,7 @@ function extractLowestPrice_(data, maxInspect) {
   }
 
   if (!candidates.length) throw new Error('Could not extract price from response');
-  return Math.min.apply(null, candidates);
+  return median_(candidates);
 }
 
 function extractItemDescription_(data, maxInspect) {
