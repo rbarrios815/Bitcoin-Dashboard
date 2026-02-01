@@ -438,6 +438,11 @@
     const cfg = getCommodityConfig();
     return n.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
   }
+  function fmtCommodityForMode(n, mode){
+    if (!isFinite(n)) return "—";
+    const cfg = getCommodityConfigById(mode);
+    return n.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
+  }
   function fmtDate(d){
     if (!d) return "—";
     const dt = new Date(d);
@@ -583,6 +588,9 @@
   function getCommodityConfig(){
     return COMMODITIES.find(x => x.id === commodityMode) || COMMODITIES[0];
   }
+  function getCommodityConfigById(mode){
+    return COMMODITIES.find(x => x.id === mode) || COMMODITIES[0];
+  }
 
   function updateCommodityTitle(){
     const cfg = getCommodityConfig();
@@ -658,8 +666,12 @@
   }
 
   function getCommodityValue(usd, sats, ts){
+    return getCommodityValueForMode(commodityMode, usd, sats, ts);
+  }
+
+  function getCommodityValueForMode(mode, usd, sats, ts){
     if (!isFinite(usd) && !isFinite(sats)) return NaN;
-    switch (commodityMode) {
+    switch (mode) {
       case "sats":
         return isFinite(sats) ? (sats / 10000) : NaN;
       case "dollars":
@@ -747,12 +759,16 @@
       const firstCommodity = first ? fmtCommodity(getCommodityValue(first.usd, first.sats, first.ts)) : "—";
       const firstUsd = first?.usd != null ? fmtUsd(first.usd) : "—";
       const firstSats = first?.sats != null ? fmtSats(first.sats) : "—";
+      const firstGold = first ? fmtCommodityForMode(getCommodityValueForMode("gold", first.usd, first.sats, first.ts), "gold") : "—";
+      const firstSilver = first ? fmtCommodityForMode(getCommodityValueForMode("silver", first.usd, first.sats, first.ts), "silver") : "—";
       const vendorCount = Number.isFinite(row?.vendor_count) ? row.vendor_count : 0;
       const usdClass = priceCompareClass(usd, first?.usd);
       const satsClass = priceCompareClass(sats, first?.sats);
       const isUnverified = !stale && !hasSourceUrl(row);
       const latestTs = row?.ts ? fmtDateTime(row.ts) : (latest?.ts ? fmtDateTime(latest.ts) : "—");
       const commodityValue = getCommodityValue(usd, sats, row?.ts || latest?.ts);
+      const latestGold = fmtCommodityForMode(getCommodityValueForMode("gold", usd, sats, row?.ts || latest?.ts), "gold");
+      const latestSilver = fmtCommodityForMode(getCommodityValueForMode("silver", usd, sats, row?.ts || latest?.ts), "silver");
 
       const div = document.createElement("div");
       div.className = "item" + (it.id === activeItemId ? " active" : "");
@@ -769,12 +785,14 @@
           <span>
             Latest: <span>${fmtCommodity(commodityValue)}</span> •
             <span class="${usdClass}">${usd != null ? fmtUsd(usd) : "—"}</span> /
-            <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span>
+            <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span> /
+            <span>${latestGold}</span> /
+            <span>${latestSilver}</span>
             <span>as of ${escapeHtml(latestTs)}</span>
           </span>
         </div>
         <div class="first-available">
-          <span>Earliest: ${firstCommodity} • ${firstUsd} / ${firstSats} on ${firstDate}</span>
+          <span>Earliest: ${firstCommodity} • ${firstUsd} / ${firstSats} / ${firstGold} / ${firstSilver} on ${firstDate}</span>
           <span>
             Vendors seen: ${vendorCount}
             ${sourceUrl ? `• <a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source URL</a>` : "• No source URL"}
@@ -1125,26 +1143,58 @@
     $("infl").innerHTML = `<span class="${inflCls}">${inflationPct.toFixed(2)}%</span>`;
     $("basketIndex").textContent = fmtCommodity(last);
 
-    const labels = hist.map(p => new Date(p.ts).toLocaleDateString());
-    const values = hist.map(p => getCommodityValue(Number(p.basketIndexUsd), Number(p.basketIndexSats), p.ts));
+    const latestPoint = hist[hist.length - 1];
+    const latestUsd = Number(latestPoint?.basketIndexUsd);
+    const latestSats = Number(latestPoint?.basketIndexSats);
+    const basketValues = [
+      getCommodityValueForMode("dollars", latestUsd, latestSats, latestPoint?.ts),
+      getCommodityValueForMode("gold", latestUsd, latestSats, latestPoint?.ts),
+      getCommodityValueForMode("silver", latestUsd, latestSats, latestPoint?.ts),
+      getCommodityValueForMode("grocery", latestUsd, latestSats, latestPoint?.ts)
+    ];
+    const basketLabels = [
+      "Basket Index ($10)",
+      "Basket Index (g gold)",
+      "Basket Index (g silver)",
+      "Basket Index (10 groceries)"
+    ];
 
     basketChart = destroyChartSafe(basketChart);
 
     const ctx = $("basketChart").getContext("2d");
     basketChart = new Chart(ctx, {
-      type: "line",
+      type: "bar",
       data: {
-        labels,
+        labels: basketLabels,
         datasets: [
-          { label: `Basket Index (${cfg.unitLabel})`, data: values, borderWidth: 2, tension: 0.25, pointRadius: 2 }
+          {
+            label: "Basket Index (latest)",
+            data: basketValues,
+            borderWidth: 1,
+            backgroundColor: [
+              "rgba(125,211,252,0.55)",
+              "rgba(196,181,253,0.55)",
+              "rgba(52,211,153,0.55)",
+              "rgba(251,191,36,0.55)"
+            ],
+            borderColor: [
+              "rgba(125,211,252,0.95)",
+              "rgba(196,181,253,0.95)",
+              "rgba(52,211,153,0.95)",
+              "rgba(251,191,36,0.95)"
+            ]
+          }
         ]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         animation: false,
-        plugins: { legend: { display: true } },
-        scales: { x: { ticks: { maxTicksLimit: 8 } } }
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 8 } },
+          y: { beginAtZero: true }
+        }
       }
     });
   }
