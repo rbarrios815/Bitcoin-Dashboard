@@ -564,14 +564,18 @@
       div.innerHTML = `
         <div class="name">${escapeHtml(description)} ${badge}</div>
         <div class="meta">
-          <span>Latest: <span class="${usdClass}">${usd != null ? fmtUsd(usd) : "—"}</span> / <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span></span>
-          <span>Provider: ${escapeHtml(source || "—")}</span>
-          <span>As of: ${escapeHtml(latestTs)}</span>
-          ${sourceUrl ? `<a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source URL</a>` : "<span>No source URL</span>"}
+          <span>
+            Latest: <span class="${usdClass}">${usd != null ? fmtUsd(usd) : "—"}</span> /
+            <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span>
+            <span>as of ${escapeHtml(latestTs)}</span>
+          </span>
         </div>
         <div class="first-available">
           <span>Earliest: ${firstUsd} / ${firstSats} on ${firstDate}</span>
-          <span>Vendors seen: ${vendorCount}</span>
+          <span>
+            Vendors seen: ${vendorCount}
+            ${sourceUrl ? `• <a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source URL</a>` : "• No source URL"}
+          </span>
         </div>
       `;
       root.appendChild(div);
