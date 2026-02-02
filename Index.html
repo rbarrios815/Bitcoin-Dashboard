@@ -933,7 +933,6 @@
       const firstDate = fmtDate(first?.ts);
       const firstCommodity = first ? fmtCommodity(getCommodityValue(first.usd, first.sats, first.ts)) : "—";
       const firstCommodityValue = first ? getCommodityValue(first.usd, first.sats, first.ts) : NaN;
-      const firstUsd = first?.usd != null ? fmtUsd(first.usd) : "—";
       const firstSats = first?.sats != null ? fmtSats(first.sats) : "—";
       const firstGoldValue = first ? getCommodityValueForMode("gold", first.usd, first.sats, first.ts) : NaN;
       const firstSilverValue = first ? getCommodityValueForMode("silver", first.usd, first.sats, first.ts) : NaN;
@@ -942,7 +941,6 @@
       const firstSilver = first ? fmtCommodityForMode(firstSilverValue, "silver") : "—";
       const firstMwh = first ? fmtCommodityForMode(firstMwhValue, "mwh") : "—";
       const vendorCount = Number.isFinite(row?.vendor_count) ? row.vendor_count : 0;
-      const usdClass = priceCompareClass(usd, first?.usd);
       const satsClass = priceCompareClass(sats, first?.sats);
       const isUnverified = !stale && !hasSourceUrl(row) && !isCashTen;
       const latestTsLabel = latestTs ? fmtDateTime(latestTs) : "—";
@@ -972,7 +970,6 @@
         <div class="meta">
           <span>
             Latest: <span class="${commodityClass}">${fmtCommodity(commodityValue)}</span> •
-            <span class="${usdClass}">${usd != null ? fmtUsd(usd) : "—"}</span> /
             <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span> /
             <span class="${latestGoldClass}">${latestGold}</span> /
             <span class="${latestSilverClass}">${latestSilver}</span> /
@@ -981,7 +978,7 @@
           </span>
         </div>
         <div class="first-available">
-          <span>Earliest: ${firstCommodity} • ${firstUsd} / ${firstSats} / ${firstGold} / ${firstSilver} / ${firstMwh} on ${firstDate}</span>
+          <span>Earliest: ${firstCommodity} • ${firstSats} / ${firstGold} / ${firstSilver} / ${firstMwh} on ${firstDate}</span>
           <span>
             Vendors seen: ${vendorCount}
             ${sourceUrl ? `• <a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source URL</a>` : "• No source URL"}
