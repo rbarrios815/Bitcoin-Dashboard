@@ -382,6 +382,20 @@
         <canvas id="basketChart"></canvas>
       </div>
       <div class="note" id="basketChartNote"></div>
+
+      <div style="height:12px"></div>
+      <div class="chart-title">Normalized basket index (baseline = 100)</div>
+      <div class="chartBox">
+        <canvas id="basketIndexChart"></canvas>
+      </div>
+      <div class="note" id="basketIndexNote"></div>
+
+      <div style="height:12px"></div>
+      <div class="chart-title">Basket change by item (USD delta vs baseline)</div>
+      <div class="chartBox">
+        <canvas id="basketContributionChart"></canvas>
+      </div>
+      <div class="note" id="basketContributionNote"></div>
     </div>
 
     <div class="row view-controls">
@@ -457,6 +471,8 @@
 
   let itemCharts = [];
   let basketChart = null;
+  let basketIndexChart = null;
+  let basketContributionChart = null;
   let fetchProgressTimer = null;
   let fetchProgressHideTimer = null;
   let fetchProgressStart = null;
@@ -543,6 +559,12 @@
     const last = [...series].reverse().find(val => isFinite(val));
     if (!isFinite(first) || !isFinite(last) || first === 0) return 0;
     return ((last / first) - 1) * 100;
+  }
+
+  function getFirstFinite(series){
+    if (!Array.isArray(series)) return null;
+    const value = series.find(val => isFinite(val));
+    return isFinite(value) ? value : null;
   }
 
   function getAvgFetchMs(){
@@ -1341,6 +1363,8 @@
     $("infl").innerHTML = `<span class="${inflCls}">${inflationPct.toFixed(2)}%</span>`;
     $("basketIndex").textContent = fmtUsd(lastUsd);
     const noteEl = $("basketChartNote");
+    const scopeLabel = basketBaselineMode === "fixed" ? "fixed baseline item set" : "rolling item set";
+    const baselineLabel = baselineMeta?.baselineLabel || "the first snapshot";
     if (noteEl) {
       const firstIndex = usdSeries.findIndex(val => isFinite(val));
       const reverseIndex = [...usdSeries].reverse().findIndex(val => isFinite(val));
@@ -1352,7 +1376,6 @@
         const absPct = Math.abs(inflationPct).toFixed(2);
         const firstLabel = labels[firstIndex] || "the baseline";
         const lastLabel = labels[lastIndex] || "latest";
-        const scopeLabel = basketBaselineMode === "fixed" ? "fixed baseline item set" : "rolling item set";
         noteEl.textContent = `Since ${firstLabel}, the basket index is ${trend} ${absPct}% (${fmtUsd(firstUsd)} → ${fmtUsd(lastUsd)}). Each line shows the basket priced in a different commodity view using the ${scopeLabel}. Latest point is ${lastLabel}.`;
       }
     }
@@ -1429,6 +1452,11 @@
     });
 
     renderBasketCommodityStats(hist, usdSeries, satsSeries);
+
+    buildNormalizedBasketChart(labels, usdSeries, baselineLabel, scopeLabel);
+
+    const itemHistories = await ensureBasketItemHistories();
+    buildBasketContributionChart(hist, itemHistories, hist[0]?.ts, scopeLabel);
   }
 
   function renderBasketCommodityStats(hist, usdSeries, satsSeries){
@@ -1458,6 +1486,190 @@
       `;
     }).join("");
     wrap.innerHTML = rows || "";
+  }
+
+  function buildNormalizedBasketChart(labels, usdSeries, baselineLabel, scopeLabel){
+    const baselineValue = getFirstFinite(usdSeries);
+    const normalizedSeries = usdSeries.map(val => {
+      if (!isFinite(val) || !isFinite(baselineValue) || baselineValue === 0) return null;
+      return (val / baselineValue) * 100;
+    });
+
+    const noteEl = $("basketIndexNote");
+    if (noteEl) {
+      if (!isFinite(baselineValue)) {
+        noteEl.textContent = "No basket history yet. Record snapshots to see the normalized index.";
+      } else {
+        const lastVal = [...normalizedSeries].reverse().find(val => isFinite(val));
+        const lastLabel = [...labels].reverse().find((_, idx) => isFinite(normalizedSeries[normalizedSeries.length - 1 - idx])) || "latest";
+        noteEl.textContent = `Baseline set to ${baselineLabel || "the first snapshot"} (index = 100). Latest index is ${isFinite(lastVal) ? lastVal.toFixed(2) : "—"} as of ${lastLabel}. The ${scopeLabel} applies.`;
+      }
+    }
+
+    basketIndexChart = destroyChartSafe(basketIndexChart);
+    const ctx = $("basketIndexChart")?.getContext("2d");
+    if (!ctx) return;
+    basketIndexChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: "Basket index (baseline = 100)",
+          data: normalizedSeries,
+          borderColor: "#34d399",
+          backgroundColor: "rgba(52,211,153,0.18)",
+          pointBackgroundColor: "#34d399",
+          pointBorderColor: "#34d399",
+          borderWidth: 2,
+          tension: 0.25,
+          pointRadius: 2,
+          spanGaps: true
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: { legend: { display: true } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 6 } },
+          y: {
+            title: { display: true, text: "Index (baseline = 100)" },
+            beginAtZero: false
+          }
+        }
+      }
+    });
+  }
+
+  function buildBasketContributionChart(hist, itemHistories, baselineTs, scopeLabel){
+    basketContributionChart = destroyChartSafe(basketContributionChart);
+    const noteEl = $("basketContributionNote");
+    const ctx = $("basketContributionChart")?.getContext("2d");
+    if (!ctx) return;
+    if (!baselineTs || !hist.length || !itemHistories?.length) {
+      if (noteEl) noteEl.textContent = "No item history available yet.";
+      return;
+    }
+
+    const baselineItems = itemHistories
+      .map(entry => {
+        const baselineValue = entry.historyMap.get(baselineTs)?.usd;
+        return {
+          description: entry.description,
+          historyMap: entry.historyMap,
+          baselineValue: Number(baselineValue)
+        };
+      })
+      .filter(entry => isFinite(entry.baselineValue));
+
+    if (!baselineItems.length) {
+      if (noteEl) noteEl.textContent = "No baseline item prices found for the first snapshot.";
+      return;
+    }
+
+    const latestTs = hist[hist.length - 1]?.ts;
+    const latestValueForItem = (entry) => {
+      if (entry.historyMap.has(latestTs)) {
+        const value = entry.historyMap.get(latestTs)?.usd;
+        if (isFinite(value)) return Number(value);
+      }
+      for (let i = hist.length - 1; i >= 0; i -= 1) {
+        const value = entry.historyMap.get(hist[i].ts)?.usd;
+        if (isFinite(value)) return Number(value);
+      }
+      return NaN;
+    };
+
+    const ranked = baselineItems
+      .map(entry => {
+        const lastValue = latestValueForItem(entry);
+        const delta = isFinite(lastValue) ? lastValue - entry.baselineValue : 0;
+        return { ...entry, delta };
+      })
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+    const MAX_ITEMS = 6;
+    const selected = ranked.slice(0, MAX_ITEMS);
+    const others = ranked.slice(MAX_ITEMS);
+
+    const labels = hist.map(point => new Date(point.ts).toLocaleString());
+    const palette = [
+      "#7dd3fc", "#c4b5fd", "#34d399", "#fbbf24", "#fb7185",
+      "#a5b4fc", "#f472b6", "#93c5fd", "#86efac", "#fca5a5"
+    ];
+
+    const datasets = selected.map((entry, idx) => {
+      const color = palette[idx % palette.length];
+      const data = hist.map(point => {
+        const value = entry.historyMap.get(point.ts)?.usd;
+        if (!isFinite(value)) return null;
+        return Number(value) - entry.baselineValue;
+      });
+      return {
+        label: entry.description,
+        data,
+        borderColor: color,
+        backgroundColor: hexToRgba(color, 0.22),
+        pointBackgroundColor: color,
+        pointBorderColor: color,
+        borderWidth: 1.5,
+        tension: 0.25,
+        pointRadius: 1.5,
+        fill: true,
+        spanGaps: true
+      };
+    });
+
+    if (others.length) {
+      const otherData = hist.map(point => {
+        let total = 0;
+        let hasValue = false;
+        others.forEach(entry => {
+          const value = entry.historyMap.get(point.ts)?.usd;
+          if (isFinite(value)) {
+            total += Number(value) - entry.baselineValue;
+            hasValue = true;
+          }
+        });
+        return hasValue ? total : null;
+      });
+      datasets.push({
+        label: "Other items",
+        data: otherData,
+        borderColor: "#94a3b8",
+        backgroundColor: "rgba(148,163,184,0.22)",
+        pointBackgroundColor: "#94a3b8",
+        pointBorderColor: "#94a3b8",
+        borderWidth: 1.5,
+        tension: 0.25,
+        pointRadius: 1.5,
+        fill: true,
+        spanGaps: true
+      });
+    }
+
+    basketContributionChart = new Chart(ctx, {
+      type: "line",
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: { legend: { display: true } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 6 } },
+          y: {
+            title: { display: true, text: "USD change vs baseline" },
+            stacked: true
+          }
+        }
+      }
+    });
+
+    if (noteEl) {
+      noteEl.textContent = `Shows USD deltas vs the first snapshot for items present at baseline. Top ${Math.min(MAX_ITEMS, selected.length)} items are shown; remaining items are grouped. The ${scopeLabel} applies.`;
+    }
   }
 
   async function ensureBasketItemHistories(){
