@@ -345,7 +345,16 @@
     </div>
 
     <div class="card">
-      <h3>Basket inflation</h3>
+      <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap;">
+        <h3 style="margin:0;">Basket inflation</h3>
+        <div class="row">
+          <span class="filter-label">Baseline scope</span>
+          <select id="basketBaselineMode">
+            <option value="rolling">Rolling (all items in each snapshot)</option>
+            <option value="fixed">Fixed baseline item set</option>
+          </select>
+        </div>
+      </div>
       <div class="kpis">
         <div class="kpi">
           <div class="label">BTC/USD</div>
@@ -365,6 +374,7 @@
         A positive percentage means the latest basket costs more than the baseline and will be in red (inflation exists).
         A negative percentage means the latest basket costs less than the baseline and will be in green (deflation exists).
       </div>
+      <div class="note" id="basketBaselineNote"></div>
       <div class="basket-stats" id="basketStats"></div>
 
       <div style="height:12px"></div>
@@ -400,6 +410,7 @@
 
         <div style="height:12px"></div>
         <div id="itemCharts"></div>
+        <div class="note" id="selectedChartNote"></div>
 
         <div class="chart-title" style="margin-top:8px;">Vendors</div>
         <div id="itemVendors" class="vendor-list"></div>
@@ -453,6 +464,8 @@
   let viewProgressTimer = null;
   let viewProgressHideTimer = null;
   let viewProgressStart = null;
+  let basketBaselineMode = "rolling";
+  let basketItemHistories = null;
 
   const FETCH_AVG_KEY = "btc_dashboard_fetch_avg_ms";
   const FETCH_MIN_MS = 2000;
@@ -1176,6 +1189,8 @@
     await ensureCommodityReferences(true);
 
     if (itemViewMode === "all") {
+      const selectedChartNote = $("selectedChartNote");
+      if (selectedChartNote) selectedChartNote.textContent = "";
       const selectedItem = cfg.items.find(x => x.id === activeItemId);
       const orderedItems = [
         selectedItem,
@@ -1232,6 +1247,12 @@
 
     const canvas = createChartSection("", false);
     buildItemChart(canvas, hist);
+
+    const selectedChartNote = $("selectedChartNote");
+    if (selectedChartNote) {
+      const cfg = getCommodityConfig();
+      selectedChartNote.textContent = `This chart tracks the selected item's price over time in ${cfg.label} (${cfg.unitLabel}). Each point is a recorded snapshot; gaps indicate missing or filtered snapshots. Use the commodity view toggle to reframe the chart in another unit.`;
+    }
 
     const vendorSet = new Set();
     hist.forEach(point => {
@@ -1299,8 +1320,20 @@
 
     await ensureCommodityReferences(true);
 
+    basketBaselineMode = $("basketBaselineMode")?.value || basketBaselineMode;
+    let usdSeries = hist.map(point => Number(point.basketIndexUsd));
+    let satsSeries = hist.map(point => Number(point.basketIndexSats));
+    let baselineMeta = null;
+
+    if (basketBaselineMode === "fixed") {
+      const itemHistories = await ensureBasketItemHistories();
+      const fixed = buildFixedBasketSeries(hist, itemHistories);
+      usdSeries = fixed.usdSeries;
+      satsSeries = fixed.satsSeries;
+      baselineMeta = fixed;
+    }
+
     const labels = hist.map(point => new Date(point.ts).toLocaleString());
-    const usdSeries = hist.map(point => Number(point.basketIndexUsd));
     const inflationPct = getInflationPctFromSeries(usdSeries);
     const inflCls = inflationPct >= 0 ? "bad" : "good";
     const firstUsd = usdSeries.find(val => isFinite(val));
@@ -1319,7 +1352,23 @@
         const absPct = Math.abs(inflationPct).toFixed(2);
         const firstLabel = labels[firstIndex] || "the baseline";
         const lastLabel = labels[lastIndex] || "latest";
-        noteEl.textContent = `Since ${firstLabel}, the basket index is ${trend} ${absPct}% (${fmtUsd(firstUsd)} → ${fmtUsd(lastUsd)}). Each line shows the basket priced in a different commodity view. Latest point is ${lastLabel}.`;
+        const scopeLabel = basketBaselineMode === "fixed" ? "fixed baseline item set" : "rolling item set";
+        noteEl.textContent = `Since ${firstLabel}, the basket index is ${trend} ${absPct}% (${fmtUsd(firstUsd)} → ${fmtUsd(lastUsd)}). Each line shows the basket priced in a different commodity view using the ${scopeLabel}. Latest point is ${lastLabel}.`;
+      }
+    }
+
+    const baselineNote = $("basketBaselineNote");
+    if (baselineNote) {
+      if (basketBaselineMode === "fixed") {
+        const baselineCount = baselineMeta?.baselineCount || 0;
+        const missingSnapshots = baselineMeta?.missingSnapshots || 0;
+        const baselineLabel = baselineMeta?.baselineLabel || "the first snapshot";
+        const missingLabel = missingSnapshots
+          ? `Gaps appear when any baseline item is missing (${missingSnapshots} snapshots).`
+          : "All snapshots include the full baseline set.";
+        baselineNote.textContent = `Fixed baseline locks the basket to the ${baselineCount} items that existed in ${baselineLabel}, so adding future items won't change the baseline meaning. ${missingLabel}`;
+      } else {
+        baselineNote.textContent = "Rolling baseline recalculates the basket using every item recorded in each snapshot, so the basket can expand as you add new items.";
       }
     }
 
@@ -1333,9 +1382,9 @@
     };
     const datasets = COMMODITIES.map(mode => {
       const color = commodityColors[mode.id] || "#7dd3fc";
-      const series = hist.map(point => {
-        const usd = Number(point.basketIndexUsd);
-        const sats = Number(point.basketIndexSats);
+      const series = hist.map((point, idx) => {
+        const usd = usdSeries[idx];
+        const sats = satsSeries[idx];
         return getCommodityValueForMode(mode.id, usd, sats, point.ts);
       });
       return {
@@ -1379,16 +1428,16 @@
       }
     });
 
-    renderBasketCommodityStats(hist);
+    renderBasketCommodityStats(hist, usdSeries, satsSeries);
   }
 
-  function renderBasketCommodityStats(hist){
+  function renderBasketCommodityStats(hist, usdSeries, satsSeries){
     const wrap = $("basketStats");
     if (!wrap) return;
     const rows = COMMODITIES.map(mode => {
-      const series = hist.map(point => {
-        const usd = Number(point.basketIndexUsd);
-        const sats = Number(point.basketIndexSats);
+      const series = hist.map((point, idx) => {
+        const usd = usdSeries[idx];
+        const sats = satsSeries[idx];
         return getCommodityValueForMode(mode.id, usd, sats, point.ts);
       });
       const last = [...series].reverse().find(val => isFinite(val));
@@ -1411,6 +1460,79 @@
     wrap.innerHTML = rows || "";
   }
 
+  async function ensureBasketItemHistories(){
+    if (basketItemHistories) return basketItemHistories;
+    const descriptions = cfg.items.map(item => {
+      const latestRow = latest?.items?.find(x => x.id === item.id);
+      return latestRow?.item_description || item.name || "";
+    }).filter(Boolean);
+
+    const histories = await new Promise((resolve, reject) => {
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getAllItemHistories(descriptions);
+    });
+
+    basketItemHistories = histories.map(entry => {
+      const history = entry.history || [];
+      const historyMap = new Map(history.map(point => [
+        point.ts,
+        { usd: Number(point.usd), sats: Number(point.sats) }
+      ]));
+      const firstTs = history.length ? history[0].ts : null;
+      return { description: entry.description, historyMap, firstTs };
+    });
+    return basketItemHistories;
+  }
+
+  function buildFixedBasketSeries(hist, itemHistories){
+    const baselineTs = hist.length ? hist[0].ts : null;
+    const baselineDate = baselineTs ? new Date(baselineTs) : null;
+    const baselineItems = itemHistories.filter(entry => {
+      if (!entry.firstTs || !baselineDate) return false;
+      return new Date(entry.firstTs) <= baselineDate;
+    });
+    const baselineCount = baselineItems.length;
+    const usdSeries = [];
+    const satsSeries = [];
+    let completeSnapshots = 0;
+
+    hist.forEach(point => {
+      if (!baselineCount) {
+        usdSeries.push(NaN);
+        satsSeries.push(NaN);
+        return;
+      }
+      let sumUsd = 0;
+      let sumSats = 0;
+      let missing = false;
+      for (const entry of baselineItems) {
+        const value = entry.historyMap.get(point.ts);
+        if (!value || !isFinite(value.usd) || !isFinite(value.sats)) {
+          missing = true;
+          break;
+        }
+        sumUsd += value.usd;
+        sumSats += value.sats;
+      }
+      if (missing) {
+        usdSeries.push(NaN);
+        satsSeries.push(NaN);
+      } else {
+        usdSeries.push(sumUsd / baselineCount);
+        satsSeries.push(sumSats / baselineCount);
+        completeSnapshots += 1;
+      }
+    });
+
+    const baselineLabel = baselineTs ? new Date(baselineTs).toLocaleDateString() : "the first snapshot";
+    return {
+      usdSeries,
+      satsSeries,
+      baselineCount,
+      baselineLabel,
+      missingSnapshots: hist.length - completeSnapshots
+    };
+  }
+
   function toggleAdminControls(){
     const controls = $("adminControls");
     const toggle = $("btnAdminToggle");
@@ -1426,6 +1548,7 @@
   $("btnBasket").addEventListener("click", renderBasket);
   $("itemViewMode").addEventListener("change", renderItemHistoryWithProgress);
   $("btnAdminToggle").addEventListener("click", toggleAdminControls);
+  $("basketBaselineMode").addEventListener("change", renderBasket);
 
   (async () => {
     try {
