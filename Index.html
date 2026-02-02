@@ -746,6 +746,22 @@
     $("historyCommodityLabel").textContent = `${cfg.label} (${cfg.unitLabel})`;
   }
 
+  function updateSelectedChartNote(){
+    const selectedChartNote = $("selectedChartNote");
+    if (!selectedChartNote) return;
+    if (!activeItemId) {
+      selectedChartNote.textContent = "";
+      return;
+    }
+    const mode = $("itemViewMode")?.value || "selected";
+    if (mode === "all") {
+      selectedChartNote.textContent = "";
+      return;
+    }
+    const cfg = getCommodityConfig();
+    selectedChartNote.textContent = `This chart tracks the selected item's price over time in ${cfg.label} (${cfg.unitLabel}). Each point is a recorded snapshot; gaps indicate missing or filtered snapshots. Use the commodity view toggle to reframe the chart in another unit.`;
+  }
+
   function renderCommodityToggle(){
     const root = $("commodityToggle");
     if (!root) return;
@@ -770,6 +786,7 @@
     await ensureCommodityReferences();
     renderItems();
     await renderItemHistory();
+    updateSelectedChartNote();
     await renderBasket();
     stopViewProgress("View loaded.");
   }
@@ -1211,8 +1228,7 @@
     await ensureCommodityReferences(true);
 
     if (itemViewMode === "all") {
-      const selectedChartNote = $("selectedChartNote");
-      if (selectedChartNote) selectedChartNote.textContent = "";
+      updateSelectedChartNote();
       const selectedItem = cfg.items.find(x => x.id === activeItemId);
       const orderedItems = [
         selectedItem,
@@ -1269,12 +1285,7 @@
 
     const canvas = createChartSection("", false);
     buildItemChart(canvas, hist);
-
-    const selectedChartNote = $("selectedChartNote");
-    if (selectedChartNote) {
-      const cfg = getCommodityConfig();
-      selectedChartNote.textContent = `This chart tracks the selected item's price over time in ${cfg.label} (${cfg.unitLabel}). Each point is a recorded snapshot; gaps indicate missing or filtered snapshots. Use the commodity view toggle to reframe the chart in another unit.`;
-    }
+    updateSelectedChartNote();
 
     const vendorSet = new Set();
     hist.forEach(point => {
