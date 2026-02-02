@@ -6,7 +6,7 @@
  *   PRICE_API_HOST = product-item-search-price-comparison.p.rapidapi.com
  *   PRICE_API_SEARCH_URL = https://product-item-search-price-comparison.p.rapidapi.com/product_search
  *   DATA_SHEET_NAME = GroceryPriceHistory
- *   ITEM_LIST = apples,bananas,milk,bread,eggs,rice,chicken,ground beef,butter,potatoes
+ *   ITEM_LIST = apples,bananas,milk,bread,eggs,rice,chicken,ground beef,butter,potatoes,salt
  *
  * OPTIONAL Script Properties:
  *   COUNTRY_CODE = United States
@@ -1217,7 +1217,8 @@ function defaultQueryForItem_(itemName) {
     gold: '0.1 gram gold bar',
     silver: '1 gram silver bar',
     mwh: '1 MWh electricity',
-    'ground beef': 'ground beef 80/20 1 lb'
+    'ground beef': 'ground beef 80/20 1 lb',
+    salt: 'iodized table salt 26 oz'
   };
   return overrides[normalized] || itemName;
 }
@@ -1473,6 +1474,7 @@ function getStandardItemDescription_(itemName) {
     'ground beef': 'Ground beef 80 20 1 lb',
     potatoes: 'Russet potatoes 5 lb bag',
     'yellow onions': 'Yellow onions 3 lb bag',
+    salt: 'Iodized table salt 26 oz',
     gold: 'Gold 0.1 gram bar',
     silver: 'Silver 1 gram bar',
     mwh: 'Electricity 1 MWh'
@@ -1513,6 +1515,8 @@ function getItemDescription_(itemName, serpResult) {
       return 'Russet potatoes suitable for baking and frying, 5 lb bag.';
     case 'yellow onions 3 lb bag':
       return 'Yellow onions commonly used for cooking, 3 lb bag.';
+    case 'iodized table salt 26 oz':
+      return 'Iodized table salt, approximately 26 oz container.';
     case 'gold 0.1 gram bar':
       return 'Gold bullion bar weighing approximately 0.1 gram.';
     case 'silver 1 gram bar':
