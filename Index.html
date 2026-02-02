@@ -488,7 +488,7 @@
   const FETCH_MAX_MS = 60000;
 
   const COMMODITIES = [
-    { id: "grocery", label: "Grocery Items", unitLabel: "grocery items", unitShort: "items", precision: 2 },
+    { id: "grocery", label: "Grocery Items", unitLabel: "USD per item", unitShort: "$/item", precision: 2 },
     { id: "sats", label: "Satoshis", unitLabel: "10,000 sats", unitShort: "x10k sats", precision: 2 },
     { id: "dollars", label: "Dollars", unitLabel: "$", unitShort: "$", precision: 2 },
     { id: "gold", label: "Gold", unitLabel: "0.1 gram gold", unitShort: "0.1g gold", precision: 4 },
@@ -512,20 +512,14 @@
     if (!isFinite(n)) return "—";
     const cfg = getCommodityConfig();
     if (cfg.id === "dollars") return fmtUsd(n);
-    if (cfg.id === "grocery") {
-      const pct = n * 100;
-      return pct.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + "% of basket";
-    }
+    if (cfg.id === "grocery") return fmtUsd(n);
     return n.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
   }
   function fmtCommodityForMode(n, mode){
     if (!isFinite(n)) return "—";
     const cfg = getCommodityConfigById(mode);
     if (cfg.id === "dollars") return fmtUsd(n);
-    if (cfg.id === "grocery") {
-      const pct = n * 100;
-      return pct.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + "% of basket";
-    }
+    if (cfg.id === "grocery") return fmtUsd(n);
     return n.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
   }
   function fmtDate(d){
@@ -855,10 +849,8 @@
         return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) : NaN;
       }
       case "grocery":
-      default: {
-        const ref = getReferenceUsd("grocery", ts);
-        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) : NaN;
-      }
+      default:
+        return isFinite(usd) ? usd : NaN;
     }
   }
 
@@ -1000,7 +992,7 @@
     const itemsNote = $("itemsNote");
     if (itemsNote) {
       if (commodityMode === "grocery") {
-        itemsNote.textContent = "Grocery items view shows each item's USD price divided by the latest basket baseline (average of all items). Values are displayed as percent of the baseline basket (e.g., 17% of basket).";
+        itemsNote.textContent = "Grocery items view shows each item's USD price directly so items can be compared individually.";
       } else {
         itemsNote.textContent = "";
       }
