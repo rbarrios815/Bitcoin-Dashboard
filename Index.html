@@ -371,6 +371,7 @@
       <div class="chartBox tall">
         <canvas id="basketChart"></canvas>
       </div>
+      <div class="note" id="basketChartNote"></div>
     </div>
 
     <div class="row view-controls">
@@ -1304,8 +1305,22 @@
     const inflCls = inflationPct >= 0 ? "bad" : "good";
     const lastUsd = [...usdSeries].reverse().find(val => isFinite(val));
     $("infl").innerHTML = `<span class="${inflCls}">${inflationPct.toFixed(2)}%</span>`;
-    $("basketIndex").textContent = fmtUsd(lastUsd);
-    renderBasketCommodityStats(hist);
+    $("basketIndex").textContent = fmtUsd(last);
+    const noteEl = $("basketChartNote");
+    if (noteEl) {
+      const firstIndex = usdSeries.findIndex(val => isFinite(val));
+      const reverseIndex = [...usdSeries].reverse().findIndex(val => isFinite(val));
+      const lastIndex = reverseIndex === -1 ? -1 : usdSeries.length - 1 - reverseIndex;
+      if (firstIndex === -1 || lastIndex === -1) {
+        noteEl.textContent = "No basket history yet. Record snapshots to see how the basket changes over time.";
+      } else {
+        const trend = inflationPct >= 0 ? "up" : "down";
+        const absPct = Math.abs(inflationPct).toFixed(2);
+        const firstLabel = labels[firstIndex] || "the baseline";
+        const lastLabel = labels[lastIndex] || "latest";
+        noteEl.textContent = `Since ${firstLabel}, the basket index is ${trend} ${absPct}% (${fmtUsd(first)} → ${fmtUsd(last)}). Each line shows the basket priced in a different commodity view. Latest point is ${lastLabel}.`;
+      }
+    }
 
     const commodityColors = {
       grocery: "#fbbf24",
