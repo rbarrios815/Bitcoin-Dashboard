@@ -6,7 +6,7 @@
  *   PRICE_API_HOST = product-item-search-price-comparison.p.rapidapi.com
  *   PRICE_API_SEARCH_URL = https://product-item-search-price-comparison.p.rapidapi.com/product_search
  *   DATA_SHEET_NAME = GroceryPriceHistory
- *   ITEM_LIST = apples,bananas,milk,bread,eggs,rice,chicken,ground beef,butter,potatoes
+ *   ITEM_LIST = apples,bananas,milk,bread,eggs,rice,chicken,ground beef,butter,potatoes,salt
  *
  * OPTIONAL Script Properties:
  *   COUNTRY_CODE = United States
@@ -1208,6 +1208,7 @@ function ensureCommodityItems_(items) {
   addCommodity('gold', 'Gold');
   addCommodity('silver', 'Silver');
   addCommodity('mwh', 'MWh');
+  addCommodity('salt', 'Salt');
   addCommodity('cash10', '$10');
 }
 
@@ -1217,6 +1218,7 @@ function defaultQueryForItem_(itemName) {
     gold: '0.1 gram gold bar',
     silver: '1 gram silver bar',
     mwh: '1 MWh electricity',
+    salt: 'table salt 26 oz',
     'ground beef': 'ground beef 80/20 1 lb'
   };
   return overrides[normalized] || itemName;
