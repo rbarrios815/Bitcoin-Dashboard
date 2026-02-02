@@ -355,24 +355,9 @@
           </select>
         </div>
       </div>
-      <div class="kpis">
-        <div class="kpi">
-          <div class="label">BTC/USD</div>
-          <div class="val" id="btcUsd">—</div>
-        </div>
-        <div class="kpi">
-          <div class="label" id="basketIndexLabel">Basket Index (USD)</div>
-          <div class="val" id="basketIndex">—</div>
-        </div>
-        <div class="kpi">
-          <div class="label" id="inflLabel">Inflation vs baseline (USD view)</div>
-          <div class="val" id="infl">—</div>
-        </div>
-      </div>
       <div class="note">
-        Inflation vs baseline compares the latest basket index in USD to your first recorded snapshot.
-        A positive percentage means the latest basket costs more than the baseline and will be in red (inflation exists).
-        A negative percentage means the latest basket costs less than the baseline and will be in green (deflation exists).
+        Inflation vs baseline is defined as ((latest basket index ÷ baseline basket index) − 1) × 100.
+        Positive percentages are shown in red (inflation), while negative percentages are shown in green (deflation).
       </div>
       <div class="note" id="basketBaselineNote"></div>
       <div class="basket-stats" id="basketStats"></div>
@@ -438,7 +423,7 @@
                 <th id="historyCommodityLabel">Commodity</th>
                 <th>USD</th>
                 <th>Sats</th>
-                <th>Gold (0.1g)</th>
+                <th>Gold (g)</th>
                 <th>Silver (g)</th>
                 <th>MWh</th>
                 <th>Vendor</th>
@@ -487,11 +472,12 @@
   const FETCH_MIN_MS = 2000;
   const FETCH_MAX_MS = 60000;
 
+  const GOLD_UNIT_GRAMS = 0.1;
   const COMMODITIES = [
     { id: "grocery", label: "Grocery Items", unitLabel: "USD per item", unitShort: "$/item", precision: 2 },
     { id: "sats", label: "Satoshis", unitLabel: "10,000 sats", unitShort: "x10k sats", precision: 2 },
     { id: "dollars", label: "Dollars", unitLabel: "$", unitShort: "$", precision: 2 },
-    { id: "gold", label: "Gold", unitLabel: "0.1 gram gold", unitShort: "0.1g gold", precision: 4 },
+    { id: "gold", label: "Gold", unitLabel: "grams of gold", unitShort: "g gold", precision: 4 },
     { id: "silver", label: "Silver", unitLabel: "1 gram silver", unitShort: "g silver", precision: 4 },
     { id: "mwh", label: "MWh", unitLabel: "1 MWh electricity", unitShort: "MWh", precision: 4 }
   ];
@@ -838,7 +824,7 @@
         return isFinite(usd) ? usd : NaN;
       case "gold": {
         const ref = getReferenceUsd("gold", ts);
-        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) : NaN;
+        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) * GOLD_UNIT_GRAMS : NaN;
       }
       case "silver": {
         const ref = getReferenceUsd("silver", ts);
@@ -1019,10 +1005,13 @@
         google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getLatestSnapshotFromSheet();
       });
 
-      if (latest?.btcUsd != null) {
-        $("btcUsd").textContent = fmtUsd(latest.btcUsd);
-      } else {
-        $("btcUsd").textContent = "—";
+      const btcEl = $("btcUsd");
+      if (btcEl) {
+        if (latest?.btcUsd != null) {
+          btcEl.textContent = fmtUsd(latest.btcUsd);
+        } else {
+          btcEl.textContent = "—";
+        }
       }
 
       if (!activeItemId && cfg.items.length) activeItemId = cfg.items[0].id;
@@ -1055,7 +1044,10 @@
         google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).fetchLatestSnapshot();
       });
 
-      $("btcUsd").textContent = fmtUsd(latest.btcUsd);
+      const btcEl = $("btcUsd");
+      if (btcEl) {
+        btcEl.textContent = fmtUsd(latest.btcUsd);
+      }
 
       if (!activeItemId && cfg.items.length) activeItemId = cfg.items[0].id;
       renderCommodityToggle();
@@ -1360,11 +1352,8 @@
 
     const labels = hist.map(point => new Date(point.ts).toLocaleString());
     const inflationPct = getInflationPctFromSeries(usdSeries);
-    const inflCls = inflationPct >= 0 ? "bad" : "good";
     const firstUsd = usdSeries.find(val => isFinite(val));
     const lastUsd = [...usdSeries].reverse().find(val => isFinite(val));
-    $("infl").innerHTML = `<span class="${inflCls}">${inflationPct.toFixed(2)}%</span>`;
-    $("basketIndex").textContent = fmtUsd(lastUsd);
     const noteEl = $("basketChartNote");
     const scopeLabel = basketBaselineMode === "fixed" ? "fixed baseline item set" : "rolling item set";
     const baselineLabel = baselineMeta?.baselineLabel || "the first snapshot";
@@ -1375,11 +1364,12 @@
       if (firstIndex === -1 || lastIndex === -1) {
         noteEl.textContent = "No basket history yet. Record snapshots to see how the basket changes over time.";
       } else {
+        const inflCls = inflationPct >= 0 ? "bad" : "good";
         const trend = inflationPct >= 0 ? "up" : "down";
         const absPct = Math.abs(inflationPct).toFixed(2);
         const firstLabel = labels[firstIndex] || "the baseline";
         const lastLabel = labels[lastIndex] || "latest";
-        noteEl.textContent = `Since ${firstLabel}, the basket index is ${trend} ${absPct}% (${fmtUsd(firstUsd)} → ${fmtUsd(lastUsd)}). Each line shows the basket priced in a different commodity view using the ${scopeLabel}. Latest point is ${lastLabel}.`;
+        noteEl.innerHTML = `Since ${escapeHtml(firstLabel)}, the basket index is ${trend} <span class="${inflCls}">${absPct}%</span> (${escapeHtml(fmtUsd(firstUsd))} → ${escapeHtml(fmtUsd(lastUsd))}). Each line shows the basket priced in a different commodity view using the ${escapeHtml(scopeLabel)}. Latest point is ${escapeHtml(lastLabel)}.`;
       }
     }
 
