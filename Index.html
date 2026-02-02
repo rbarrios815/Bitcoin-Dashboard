@@ -1303,9 +1303,10 @@
     const usdSeries = hist.map(point => Number(point.basketIndexUsd));
     const inflationPct = getInflationPctFromSeries(usdSeries);
     const inflCls = inflationPct >= 0 ? "bad" : "good";
+    const firstUsd = usdSeries.find(val => isFinite(val));
     const lastUsd = [...usdSeries].reverse().find(val => isFinite(val));
     $("infl").innerHTML = `<span class="${inflCls}">${inflationPct.toFixed(2)}%</span>`;
-    $("basketIndex").textContent = fmtUsd(last);
+    $("basketIndex").textContent = fmtUsd(lastUsd);
     const noteEl = $("basketChartNote");
     if (noteEl) {
       const firstIndex = usdSeries.findIndex(val => isFinite(val));
@@ -1318,7 +1319,7 @@
         const absPct = Math.abs(inflationPct).toFixed(2);
         const firstLabel = labels[firstIndex] || "the baseline";
         const lastLabel = labels[lastIndex] || "latest";
-        noteEl.textContent = `Since ${firstLabel}, the basket index is ${trend} ${absPct}% (${fmtUsd(first)} → ${fmtUsd(last)}). Each line shows the basket priced in a different commodity view. Latest point is ${lastLabel}.`;
+        noteEl.textContent = `Since ${firstLabel}, the basket index is ${trend} ${absPct}% (${fmtUsd(firstUsd)} → ${fmtUsd(lastUsd)}). Each line shows the basket priced in a different commodity view. Latest point is ${lastLabel}.`;
       }
     }
 
