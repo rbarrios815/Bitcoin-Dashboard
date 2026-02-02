@@ -194,6 +194,37 @@
     .good{ color: var(--good); font-weight:900; }
     .bad{ color: var(--bad); font-weight:900; }
     .warn{ color: var(--warn); font-weight:900; }
+    .basket-stats{
+      margin-top:12px;
+      display:grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap:10px;
+    }
+    .basket-stat{
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:14px;
+      padding:10px;
+      background: rgba(0,0,0,.10);
+    }
+    .basket-stat .label{
+      font-size:12px;
+      color:var(--muted);
+      text-transform:uppercase;
+      letter-spacing:.35px;
+      font-weight:800;
+    }
+    .basket-stat .metric{
+      margin-top:8px;
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .basket-stat .metric strong{
+      color:var(--text);
+      font-size:14px;
+    }
     .first-available{
       margin-top:6px;
       font-size:12px;
@@ -334,11 +365,13 @@
         A positive percentage means the latest basket costs more than the baseline and will be in red (inflation exists).
         A negative percentage means the latest basket costs less than the baseline and will be in green (deflation exists).
       </div>
+      <div class="basket-stats" id="basketStats"></div>
 
       <div style="height:12px"></div>
       <div class="chartBox tall">
         <canvas id="basketChart"></canvas>
       </div>
+      <div class="note" id="basketChartNote"></div>
     </div>
 
     <div class="row view-controls">
@@ -489,6 +522,14 @@
   function destroyChartSafe(ch){
     if (ch && typeof ch.destroy === "function") ch.destroy();
     return null;
+  }
+
+  function getInflationPctFromSeries(series){
+    if (!Array.isArray(series)) return 0;
+    const first = series.find(val => isFinite(val));
+    const last = [...series].reverse().find(val => isFinite(val));
+    if (!isFinite(first) || !isFinite(last) || first === 0) return 0;
+    return ((last / first) - 1) * 100;
   }
 
   function getAvgFetchMs(){
@@ -1260,14 +1301,26 @@
 
     const labels = hist.map(point => new Date(point.ts).toLocaleString());
     const usdSeries = hist.map(point => Number(point.basketIndexUsd));
-    const first = usdSeries.find(val => isFinite(val));
-    const last = [...usdSeries].reverse().find(val => isFinite(val));
-    const inflationPct = (isFinite(first) && isFinite(last) && first !== 0)
-      ? ((last / first) - 1) * 100
-      : 0;
+    const inflationPct = getInflationPctFromSeries(usdSeries);
     const inflCls = inflationPct >= 0 ? "bad" : "good";
+    const lastUsd = [...usdSeries].reverse().find(val => isFinite(val));
     $("infl").innerHTML = `<span class="${inflCls}">${inflationPct.toFixed(2)}%</span>`;
     $("basketIndex").textContent = fmtUsd(last);
+    const noteEl = $("basketChartNote");
+    if (noteEl) {
+      const firstIndex = usdSeries.findIndex(val => isFinite(val));
+      const reverseIndex = [...usdSeries].reverse().findIndex(val => isFinite(val));
+      const lastIndex = reverseIndex === -1 ? -1 : usdSeries.length - 1 - reverseIndex;
+      if (firstIndex === -1 || lastIndex === -1) {
+        noteEl.textContent = "No basket history yet. Record snapshots to see how the basket changes over time.";
+      } else {
+        const trend = inflationPct >= 0 ? "up" : "down";
+        const absPct = Math.abs(inflationPct).toFixed(2);
+        const firstLabel = labels[firstIndex] || "the baseline";
+        const lastLabel = labels[lastIndex] || "latest";
+        noteEl.textContent = `Since ${firstLabel}, the basket index is ${trend} ${absPct}% (${fmtUsd(first)} → ${fmtUsd(last)}). Each line shows the basket priced in a different commodity view. Latest point is ${lastLabel}.`;
+      }
+    }
 
     const commodityColors = {
       grocery: "#fbbf24",
@@ -1324,6 +1377,35 @@
         }
       }
     });
+  }
+
+  function renderBasketCommodityStats(hist){
+    const wrap = $("basketStats");
+    if (!wrap) return;
+    const rows = COMMODITIES.map(mode => {
+      const series = hist.map(point => {
+        const usd = Number(point.basketIndexUsd);
+        const sats = Number(point.basketIndexSats);
+        return getCommodityValueForMode(mode.id, usd, sats, point.ts);
+      });
+      const last = [...series].reverse().find(val => isFinite(val));
+      const inflation = getInflationPctFromSeries(series);
+      const inflCls = inflation >= 0 ? "bad" : "good";
+      return `
+        <div class="basket-stat">
+          <div class="label">${escapeHtml(mode.label)}</div>
+          <div class="metric">
+            <div>Basket index</div>
+            <strong>${escapeHtml(fmtCommodityForMode(last, mode.id))}</strong>
+          </div>
+          <div class="metric">
+            <div>Inflation vs baseline</div>
+            <strong class="${inflCls}">${inflation.toFixed(2)}%</strong>
+          </div>
+        </div>
+      `;
+    }).join("");
+    wrap.innerHTML = rows || "";
   }
 
   function toggleAdminControls(){
