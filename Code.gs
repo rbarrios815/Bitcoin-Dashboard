@@ -1208,6 +1208,7 @@ function ensureCommodityItems_(items) {
   addCommodity('gold', 'Gold');
   addCommodity('silver', 'Silver');
   addCommodity('mwh', 'MWh');
+  addCommodity('salt', 'Salt');
   addCommodity('cash10', '$10');
 }
 
