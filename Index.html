@@ -237,6 +237,22 @@
       color:var(--text);
       font-size:14px;
     }
+    .basket-stat .hover-hints{
+      margin-top:10px;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .basket-stat .hint-pill{
+      font-size:11px;
+      padding:3px 8px;
+      border-radius:999px;
+      border:1px dashed rgba(255,255,255,.28);
+      color:var(--muted);
+      background:rgba(0,0,0,.18);
+      cursor:help;
+      user-select:none;
+    }
     .first-available{
       margin-top:6px;
       font-size:12px;
@@ -561,6 +577,25 @@
     if (!Array.isArray(series)) return null;
     const value = series.find(val => isFinite(val));
     return isFinite(value) ? value : null;
+  }
+
+  function getFiniteValueAtSeriesIndex(series, idx){
+    if (!Array.isArray(series) || idx < 0 || idx >= series.length) return null;
+    const value = series[idx];
+    return isFinite(value) ? value : null;
+  }
+
+  function getFirstFiniteSeriesIndex(series){
+    if (!Array.isArray(series)) return -1;
+    return series.findIndex(value => isFinite(value));
+  }
+
+  function getLastFiniteSeriesIndex(series){
+    if (!Array.isArray(series)) return -1;
+    for (let i = series.length - 1; i >= 0; i -= 1) {
+      if (isFinite(series[i])) return i;
+    }
+    return -1;
   }
 
   function getAvgFetchMs(){
@@ -1463,17 +1498,82 @@
       }
     });
 
-    renderBasketCommodityStats(hist, usdSeries, satsSeries);
+    const itemHistories = await ensureBasketItemHistories();
+    const baselineIdx = getFirstFiniteSeriesIndex(usdSeries);
+    const currentIdx = getLastFiniteSeriesIndex(usdSeries);
+    const baselineTs = baselineIdx >= 0 ? hist[baselineIdx]?.ts : null;
+    const currentTs = currentIdx >= 0 ? hist[currentIdx]?.ts : null;
+
+    renderBasketCommodityStats(hist, usdSeries, satsSeries, {
+      itemHistories,
+      baselineTs,
+      currentTs,
+      baselineMode: basketBaselineMode
+    });
 
     buildNormalizedBasketChart(labels, usdSeries, baselineLabel, scopeLabel);
 
-    const itemHistories = await ensureBasketItemHistories();
     buildBasketContributionChart(hist, itemHistories, hist[0]?.ts, scopeLabel);
   }
 
-  function renderBasketCommodityStats(hist, usdSeries, satsSeries){
+  function getBasketItemsForTimestamp(itemHistories, ts, baselineMode, baselineTs){
+    if (!Array.isArray(itemHistories) || !ts) return { presentItems: [], missingItems: [] };
+    let scoped = itemHistories;
+    if (baselineMode === "fixed" && baselineTs) {
+      const baselineDate = new Date(baselineTs);
+      scoped = itemHistories.filter(entry => entry.firstTs && new Date(entry.firstTs) <= baselineDate);
+    }
+
+    const presentItems = [];
+    const missingItems = [];
+    scoped.forEach(entry => {
+      const value = entry.historyMap.get(ts)?.usd;
+      if (isFinite(value)) {
+        presentItems.push(`${entry.description} (${fmtUsd(Number(value))})`);
+      } else {
+        missingItems.push(entry.description);
+      }
+    });
+    return { presentItems, missingItems };
+  }
+
+  function buildBasketItemsTooltip(label, ts, itemState){
+    const prettyDate = fmtDate(ts);
+    const header = `${label} (${prettyDate})`;
+    const present = itemState?.presentItems || [];
+    const missing = itemState?.missingItems || [];
+    if (!present.length && !missing.length) return `${header}\nNo item details available.`;
+    const presentLines = present.length
+      ? present.map((item, idx) => `${idx + 1}. ${item}`).join("\n")
+      : "No items with prices.";
+    const missingLine = missing.length
+      ? `\nMissing at this snapshot: ${missing.join(", ")}`
+      : "";
+    return `${header}\n${presentLines}${missingLine}`;
+  }
+
+  function renderBasketCommodityStats(hist, usdSeries, satsSeries, detailMeta){
     const wrap = $("basketStats");
     if (!wrap) return;
+    const baselineIndex = getFirstFiniteSeriesIndex(usdSeries);
+    const currentIndex = getLastFiniteSeriesIndex(usdSeries);
+    const baselineTs = detailMeta?.baselineTs || (baselineIndex >= 0 ? hist[baselineIndex]?.ts : null);
+    const currentTs = detailMeta?.currentTs || (currentIndex >= 0 ? hist[currentIndex]?.ts : null);
+    const baselineItemState = getBasketItemsForTimestamp(
+      detailMeta?.itemHistories,
+      baselineTs,
+      detailMeta?.baselineMode,
+      baselineTs
+    );
+    const currentItemState = getBasketItemsForTimestamp(
+      detailMeta?.itemHistories,
+      currentTs,
+      detailMeta?.baselineMode,
+      baselineTs
+    );
+    const baselineItemsTitle = buildBasketItemsTooltip("Initial basket items", baselineTs, baselineItemState);
+    const currentItemsTitle = buildBasketItemsTooltip("Current basket items", currentTs, currentItemState);
+
     const rows = COMMODITIES.map(mode => {
       const series = hist.map((point, idx) => {
         const usd = usdSeries[idx];
@@ -1481,6 +1581,7 @@
         return getCommodityValueForMode(mode.id, usd, sats, point.ts);
       });
       const last = [...series].reverse().find(val => isFinite(val));
+      const baseline = getFiniteValueAtSeriesIndex(series, baselineIndex);
       const inflation = getInflationPctFromSeries(series);
       const inflCls = inflation >= 0 ? "bad" : "good";
       const boxCls = inflation > 0 ? "infl-up" : (inflation < 0 ? "infl-down" : "infl-flat");
@@ -1495,6 +1596,10 @@
             <div>Basket index</div>
             <strong>${escapeHtml(fmtCommodityForMode(last, mode.id))}</strong>
           </div>
+          <div class="metric">
+            <div>Original baseline basket index</div>
+            <strong>${escapeHtml(fmtCommodityForMode(baseline, mode.id))}</strong>
+          </div>
           ${mode.id === "sats" ? `
           <div class="metric">
             <div>BTC equivalent</div>
@@ -1504,6 +1609,10 @@
           <div class="metric">
             <div>Inflation vs baseline</div>
             <strong class="${inflCls}">${inflation.toFixed(2)}%</strong>
+          </div>
+          <div class="hover-hints">
+            <span class="hint-pill" title="${escapeHtml(baselineItemsTitle)}">Hover: initial basket items</span>
+            <span class="hint-pill" title="${escapeHtml(currentItemsTitle)}">Hover: current basket items</span>
           </div>
         </div>
       `;
