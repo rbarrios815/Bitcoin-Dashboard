@@ -491,7 +491,7 @@
     { id: "dollars", label: "Dollars", unitLabel: "$", unitShort: "$", precision: 2 },
     { id: "gold", label: "Gold", unitLabel: "grams of gold", unitShort: "g gold", precision: 4 },
     { id: "silver", label: "Silver", unitLabel: "1 gram silver", unitShort: "g silver", precision: 4 },
-    { id: "mwh", label: "MWh", unitLabel: "1 MWh electricity", unitShort: "MWh", precision: 4 }
+    { id: "mwh", label: "MWh", unitLabel: "1 MWh electricity", unitShort: "MWh", precision: 2 }
   ];
 
   const $ = (id) => document.getElementById(id);
@@ -848,7 +848,7 @@
       }
       case "mwh": {
         const ref = getReferenceUsd("mwh", ts);
-        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) : NaN;
+        return isFinite(usd) && isFinite(ref) && ref > 0 ? ((usd / 100) / ref) : NaN;
       }
       case "grocery":
       default:
@@ -894,7 +894,10 @@
         referenceHistory.silver = entry.history || [];
       }
       if (mwhDescription && key === normalizeKey(mwhDescription)) {
-        referenceHistory.mwh = entry.history || [];
+        referenceHistory.mwh = (entry.history || []).map(point => ({
+          ...point,
+          usd: isFinite(Number(point.usd)) ? Number(point.usd) / 100 : point.usd
+        }));
       }
     });
   }
@@ -923,6 +926,7 @@
       const cashUsd = 10;
       const cashSats = isFinite(latest?.btcUsd) ? (cashUsd / latest.btcUsd) * 100000000 : NaN;
       const usd = isCashTen ? cashUsd : row?.usd;
+      const normalizedUsd = it.id === "mwh" && isFinite(Number(usd)) ? Number(usd) / 100 : usd;
       const sats = isCashTen ? cashSats : row?.sats;
       const stale = isCashTen ? false : Boolean(row?.is_stale);
       const source = row?.price_source || "";
@@ -931,12 +935,13 @@
       const sourceUrl = getSourceUrl(row);
       const first = row?.first_available;
       const firstDate = fmtDate(first?.ts);
-      const firstCommodity = first ? fmtCommodity(getCommodityValue(first.usd, first.sats, first.ts)) : "—";
-      const firstCommodityValue = first ? getCommodityValue(first.usd, first.sats, first.ts) : NaN;
+      const firstUsd = it.id === "mwh" && first && isFinite(Number(first.usd)) ? Number(first.usd) / 100 : first?.usd;
+      const firstCommodity = first ? fmtCommodity(getCommodityValue(firstUsd, first.sats, first.ts)) : "—";
+      const firstCommodityValue = first ? getCommodityValue(firstUsd, first.sats, first.ts) : NaN;
       const firstSats = first?.sats != null ? fmtSats(first.sats) : "—";
-      const firstGoldValue = first ? getCommodityValueForMode("gold", first.usd, first.sats, first.ts) : NaN;
-      const firstSilverValue = first ? getCommodityValueForMode("silver", first.usd, first.sats, first.ts) : NaN;
-      const firstMwhValue = first ? getCommodityValueForMode("mwh", first.usd, first.sats, first.ts) : NaN;
+      const firstGoldValue = first ? getCommodityValueForMode("gold", firstUsd, first.sats, first.ts) : NaN;
+      const firstSilverValue = first ? getCommodityValueForMode("silver", firstUsd, first.sats, first.ts) : NaN;
+      const firstMwhValue = first ? getCommodityValueForMode("mwh", firstUsd, first.sats, first.ts) : NaN;
       const firstGold = first ? fmtCommodityForMode(firstGoldValue, "gold") : "—";
       const firstSilver = first ? fmtCommodityForMode(firstSilverValue, "silver") : "—";
       const firstMwh = first ? fmtCommodityForMode(firstMwhValue, "mwh") : "—";
@@ -944,11 +949,11 @@
       const satsClass = priceCompareClass(sats, first?.sats);
       const isUnverified = !stale && !hasSourceUrl(row) && !isCashTen;
       const latestTsLabel = latestTs ? fmtDateTime(latestTs) : "—";
-      const commodityValue = getCommodityValue(usd, sats, latestTs);
+      const commodityValue = getCommodityValue(normalizedUsd, sats, latestTs);
       const commodityClass = priceCompareClass(commodityValue, firstCommodityValue);
-      const latestGoldValue = getCommodityValueForMode("gold", usd, sats, latestTs);
-      const latestSilverValue = getCommodityValueForMode("silver", usd, sats, latestTs);
-      const latestMwhValue = getCommodityValueForMode("mwh", usd, sats, latestTs);
+      const latestGoldValue = getCommodityValueForMode("gold", normalizedUsd, sats, latestTs);
+      const latestSilverValue = getCommodityValueForMode("silver", normalizedUsd, sats, latestTs);
+      const latestMwhValue = getCommodityValueForMode("mwh", normalizedUsd, sats, latestTs);
       const latestGoldClass = commodityMode === "gold" ? priceCompareClass(latestGoldValue, firstGoldValue) : "";
       const latestSilverClass = commodityMode === "silver" ? priceCompareClass(latestSilverValue, firstSilverValue) : "";
       const latestMwhClass = commodityMode === "mwh" ? priceCompareClass(latestMwhValue, firstMwhValue) : "";
@@ -1306,18 +1311,19 @@
     } else {
       const orderedHistory = [...hist].sort((a, b) => new Date(b.ts) - new Date(a.ts));
       rowsRoot.innerHTML = orderedHistory.map(point => {
+        const normalizedUsd = activeItemId === "mwh" && isFinite(Number(point.usd)) ? Number(point.usd) / 100 : Number(point.usd);
         const vendorLabel = isValidVendor(point.price_vendor) ? point.price_vendor : "—";
         const providerLabel = point.price_source ? point.price_source : "—";
         const sourceUrl = hasSourceUrl(point) ? point.source_url : "";
-        const commodityValue = getCommodityValue(Number(point.usd), Number(point.sats), point.ts);
-        const goldValue = getCommodityValueForMode("gold", Number(point.usd), Number(point.sats), point.ts);
-        const silverValue = getCommodityValueForMode("silver", Number(point.usd), Number(point.sats), point.ts);
-        const mwhValue = getCommodityValueForMode("mwh", Number(point.usd), Number(point.sats), point.ts);
+        const commodityValue = getCommodityValue(normalizedUsd, Number(point.sats), point.ts);
+        const goldValue = getCommodityValueForMode("gold", normalizedUsd, Number(point.sats), point.ts);
+        const silverValue = getCommodityValueForMode("silver", normalizedUsd, Number(point.sats), point.ts);
+        const mwhValue = getCommodityValueForMode("mwh", normalizedUsd, Number(point.sats), point.ts);
         return `
           <tr>
             <td>${escapeHtml(fmtDateTime(point.ts))}</td>
             <td>${escapeHtml(fmtCommodity(commodityValue))}</td>
-            <td>${escapeHtml(fmtUsd(point.usd))}</td>
+            <td>${escapeHtml(fmtUsd(normalizedUsd))}</td>
             <td>${escapeHtml(fmtSats(point.sats))}</td>
             <td>${escapeHtml(fmtCommodityForMode(goldValue, "gold"))}</td>
             <td>${escapeHtml(fmtCommodityForMode(silverValue, "silver"))}</td>
