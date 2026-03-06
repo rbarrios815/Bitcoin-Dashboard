@@ -386,6 +386,75 @@
       </div>
     </div>
 
+
+
+    <div class="card" id="ppDashboard">
+      <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap;">
+        <h3 style="margin:0;">Bitcoin purchasing power dashboard</h3>
+        <div class="row" style="gap:8px; flex-wrap:wrap;">
+          <span class="filter-label">Range</span>
+          <select id="ppRange">
+            <option value="7d">7D</option>
+            <option value="30d" selected>30D</option>
+            <option value="90d">90D</option>
+            <option value="ytd">YTD</option>
+            <option value="all">All</option>
+          </select>
+          <span class="filter-label">View</span>
+          <select id="ppViewMode">
+            <option value="basket" selected>Basket view</option>
+            <option value="item">Item view</option>
+          </select>
+          <span class="filter-label">Staleness</span>
+          <select id="ppStaleMode">
+            <option value="include" selected>Include stale values</option>
+            <option value="exclude">Exclude stale values</option>
+          </select>
+          <span class="filter-label">Item</span>
+          <select id="ppItemSelect"></select>
+          <span class="filter-label">Group</span>
+          <select id="ppGroupSelect"><option value="all">All groups</option></select>
+        </div>
+      </div>
+      <div class="kpis" id="ppHeroKpis"></div>
+      <div class="note" id="ppInsight"></div>
+      <div class="note" id="ppStaleNote"></div>
+
+      <div class="chart-title" style="margin-top:12px;">Basket cost in sats over time (lower is better)</div>
+      <div class="chartBox"><canvas id="ppSatsChart"></canvas></div>
+
+      <div class="chart-title" style="margin-top:12px;">Same basket, two rulers (normalized index, baseline = 100)</div>
+      <div class="chartBox"><canvas id="ppComparisonChart"></canvas></div>
+      <div class="note" id="ppComparisonNote"></div>
+
+      <div class="chart-title" style="margin-top:12px;">Why sats changed</div>
+      <div class="note" id="ppAttribution"></div>
+
+      <div class="chart-title" style="margin-top:12px;">Winners / losers in bitcoin terms</div>
+      <div class="basket-stats" id="ppWinnersLosers"></div>
+
+      <div class="chart-title" style="margin-top:12px;">Items ranked by sats change</div>
+      <div style="overflow-x:auto;">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Latest USD</th>
+              <th>Latest sats</th>
+              <th>USD %</th>
+              <th>Sats %</th>
+              <th>Vendor</th>
+              <th>Stale</th>
+            </tr>
+          </thead>
+          <tbody id="ppItemsTable"></tbody>
+        </table>
+      </div>
+
+      <div class="chart-title" style="margin-top:12px;">Data quality</div>
+      <div class="basket-stats" id="ppQuality"></div>
+    </div>
+
     <div class="card">
       <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap;">
         <h3 style="margin:0;">Basket inflation</h3>
@@ -510,6 +579,9 @@
   let viewProgressStart = null;
   let basketBaselineMode = "rolling";
   let basketItemHistories = null;
+  let purchasingPowerData = null;
+  let ppSatsChart = null;
+  let ppComparisonChart = null;
 
   const FETCH_AVG_KEY = "btc_dashboard_fetch_avg_ms";
   const FETCH_MIN_MS = 2000;
@@ -1097,6 +1169,7 @@
       renderItems();
       await renderItemHistoryWithProgress();
       await renderBasket();
+      await loadPurchasingPowerData();
 
       if (latest?.ts) {
         setStatus("Loaded latest snapshot from sheet: <b>" + new Date(latest.ts).toLocaleString() + "</b>");
@@ -1133,6 +1206,7 @@
 
       await renderItemHistoryWithProgress();
       await renderBasket();
+      await loadPurchasingPowerData();
 
       const anyStale = (latest.items || []).some(x => x.is_stale);
       setStatus(
@@ -1161,6 +1235,7 @@
       setStatus("Recorded <b>" + res.rowsAppended + "</b> rows at <b>" + new Date(res.recordedAt).toLocaleString() + "</b>");
       await renderBasket();
       await renderItemHistoryWithProgress();
+      await loadPurchasingPowerData();
 
     } catch (err) {
       setStatus("<b style='color:#fb7185'>Record failed:</b> " + escapeHtml(String(err)));
@@ -1923,11 +1998,294 @@
     };
   }
 
+
+  async function loadPurchasingPowerData(){
+    purchasingPowerData = await new Promise((resolve, reject) => {
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getPurchasingPowerDashboardData();
+    });
+    buildPurchasingPowerFilters();
+    renderPurchasingPowerDashboard();
+  }
+
+  function buildPurchasingPowerFilters(){
+    const itemSel = $("ppItemSelect");
+    const groupSel = $("ppGroupSelect");
+    if (!itemSel || !groupSel) return;
+
+    const items = purchasingPowerData?.items || [];
+    itemSel.innerHTML = '<option value="all">All items</option>' + items.map(item => (
+      `<option value="${escapeHtml(item.key)}">${escapeHtml(item.description)}</option>`
+    )).join('');
+
+    const groupSet = new Set();
+    (purchasingPowerData?.snapshots || []).forEach(snap => {
+      (snap.items || []).forEach(item => {
+        if (item.group) groupSet.add(item.group);
+      });
+    });
+    const groupOptions = Array.from(groupSet).sort();
+    groupSel.innerHTML = '<option value="all">All groups</option>' + groupOptions.map(group => (
+      `<option value="${escapeHtml(group)}">${escapeHtml(group)}</option>`
+    )).join('');
+  }
+
+  function getPurchasingPowerView(){
+    return {
+      range: $("ppRange")?.value || "30d",
+      viewMode: $("ppViewMode")?.value || "basket",
+      staleMode: $("ppStaleMode")?.value || "include",
+      itemKey: $("ppItemSelect")?.value || "all",
+      group: $("ppGroupSelect")?.value || "all"
+    };
+  }
+
+  function applyPurchasingPowerFilters(data, view){
+    const snapshots = (data?.snapshots || []).map(snap => ({
+      ...snap,
+      items: (snap.items || []).filter(item => {
+        if (view.staleMode === "exclude" && item.is_stale) return false;
+        if (view.group !== "all" && (item.group || "") !== view.group) return false;
+        if (view.viewMode === "item" && view.itemKey !== "all" && item.itemKey !== view.itemKey) return false;
+        return true;
+      })
+    })).filter(snap => snap.items.length > 0);
+
+    const startDate = getRangeStartDate(view.range, snapshots);
+    const ranged = snapshots.filter(snap => {
+      if (!startDate) return true;
+      return new Date(snap.ts) >= startDate;
+    });
+
+    return ranged.map(snap => {
+      const usd = snap.items.map(item => Number(item.usd)).filter(v => isFinite(v));
+      const sats = snap.items.map(item => Number(item.sats)).filter(v => isFinite(v));
+      const btc = Number(snap.btcUsd);
+      return {
+        ...snap,
+        basketUsd: usd.length ? usd.reduce((a,b)=>a+b,0) / usd.length : NaN,
+        basketSats: sats.length ? sats.reduce((a,b)=>a+b,0) / sats.length : NaN,
+        btcUsd: isFinite(btc) ? btc : NaN,
+        staleCount: snap.items.filter(item => item.is_stale).length,
+        missingCount: snap.items.filter(item => !isFinite(Number(item.usd)) || !isFinite(Number(item.sats))).length,
+        itemCount: snap.items.length
+      };
+    });
+  }
+
+  function getRangeStartDate(range, snapshots){
+    if (!snapshots.length || range === "all") return null;
+    const end = new Date(snapshots[snapshots.length - 1].ts);
+    if (range === "ytd") return new Date(end.getFullYear(), 0, 1);
+    const daysMap = { "7d": 7, "30d": 30, "90d": 90 };
+    const days = daysMap[range];
+    if (!days) return null;
+    const start = new Date(end);
+    start.setDate(start.getDate() - days + 1);
+    return start;
+  }
+
+  function pctChange(first, last){
+    if (!isFinite(first) || !isFinite(last) || first === 0) return NaN;
+    return ((last / first) - 1) * 100;
+  }
+
+  function renderPurchasingPowerDashboard(){
+    const view = getPurchasingPowerView();
+    const itemSel = $("ppItemSelect");
+    if (itemSel) itemSel.disabled = view.viewMode !== "item";
+    const filtered = applyPurchasingPowerFilters(purchasingPowerData, view);
+    renderPurchasingHero(filtered);
+    renderPurchasingCharts(filtered);
+    renderPurchasingAttribution(filtered);
+    renderPurchasingItems(filtered, view);
+    renderPurchasingWinners(filtered, view);
+    renderPurchasingQuality(filtered);
+  }
+
+  function renderPurchasingHero(snapshots){
+    const wrap = $("ppHeroKpis");
+    if (!wrap) return;
+    if (!snapshots.length) {
+      wrap.innerHTML = '<div class="kpi"><div class="label">No data in this filter.</div><div class="val">—</div></div>';
+      $("ppInsight").textContent = "No snapshots match the selected filters.";
+      return;
+    }
+    const first = snapshots[0];
+    const last = snapshots[snapshots.length - 1];
+    const metrics = [
+      { label: "Current BTC/USD", value: fmtUsd(last.btcUsd), ch: pctChange(first.btcUsd, last.btcUsd) },
+      { label: "Current basket USD", value: fmtUsd(last.basketUsd), ch: pctChange(first.basketUsd, last.basketUsd) },
+      { label: "Current basket sats", value: fmtSats(last.basketSats), ch: pctChange(first.basketSats, last.basketSats) }
+    ];
+    wrap.innerHTML = metrics.map(metric => {
+      const ch = metric.ch;
+      const cls = !isFinite(ch) ? "" : (ch > 0 ? "bad" : (ch < 0 ? "good" : ""));
+      const txt = isFinite(ch) ? `${ch > 0 ? '+' : ''}${ch.toFixed(2)}%` : "—";
+      return `<div class="kpi"><div class="label">${metric.label}</div><div class="val">${metric.value}</div><div class="label ${cls}">${txt}</div></div>`;
+    }).join("");
+
+    $("ppInsight").textContent = buildPurchasingInsight(first, last);
+    $("ppStaleNote").textContent = last.staleCount > 0
+      ? `${last.staleCount} item(s) in the latest snapshot are stale/carried forward.`
+      : "Latest snapshot has no stale carried-forward values.";
+  }
+
+  function buildPurchasingInsight(first, last){
+    const btcCh = pctChange(first.btcUsd, last.btcUsd);
+    const usdCh = pctChange(first.basketUsd, last.basketUsd);
+    const satsCh = pctChange(first.basketSats, last.basketSats);
+    if (!isFinite(satsCh)) return "Not enough clean data for an insight in this range.";
+    if (satsCh > 0) return "This basket became more expensive in bitcoin terms (it now needs more sats).";
+    if (usdCh > 0 && satsCh < 0) return "USD prices rose, but BTC/USD rose faster, so the basket became cheaper in sats.";
+    if (Math.abs(usdCh) < 1 && satsCh < 0) return "USD prices were roughly flat, but bitcoin purchasing power improved.";
+    if (usdCh < 0 && satsCh < 0) return "Both USD prices and BTC strength helped: the basket got cheaper in both USD and sats.";
+    if (isFinite(btcCh) && btcCh > usdCh) return "BTC outpaced this basket's USD inflation, improving purchasing power.";
+    return "Bitcoin purchasing power improved over this range because the basket now costs fewer sats.";
+  }
+
+  function renderPurchasingCharts(snapshots){
+    const labels = snapshots.map(s => fmtDate(s.ts));
+    const satsSeries = snapshots.map(s => isFinite(s.basketSats) ? s.basketSats : null);
+    const usdSeries = snapshots.map(s => isFinite(s.basketUsd) ? s.basketUsd : null);
+
+    ppSatsChart = destroyChartSafe(ppSatsChart);
+    ppComparisonChart = destroyChartSafe(ppComparisonChart);
+
+    ppSatsChart = new Chart($("ppSatsChart").getContext("2d"), {
+      type: "line",
+      data: { labels, datasets: [{ label: "Basket sats (lower is better)", data: satsSeries, borderColor: "#34d399", backgroundColor: "rgba(52,211,153,.15)", tension: .25, spanGaps: true }] },
+      options: { responsive: true, maintainAspectRatio: false, animation: false }
+    });
+
+    const firstUsd = usdSeries.find(v => isFinite(v));
+    const firstSats = satsSeries.find(v => isFinite(v));
+    const usdIndex = usdSeries.map(v => (isFinite(v) && isFinite(firstUsd) && firstUsd !== 0) ? (v / firstUsd) * 100 : null);
+    const satsIndex = satsSeries.map(v => (isFinite(v) && isFinite(firstSats) && firstSats !== 0) ? (v / firstSats) * 100 : null);
+
+    ppComparisonChart = new Chart($("ppComparisonChart").getContext("2d"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          { label: "Basket USD index", data: usdIndex, borderColor: "#fbbf24", tension: .25, spanGaps: true },
+          { label: "Basket sats index", data: satsIndex, borderColor: "#a5b4fc", tension: .25, spanGaps: true }
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false, animation: false }
+    });
+    $("ppComparisonNote").textContent = "Both lines are rebased to 100 at the first visible date. This chart compares direction/speed of change, not absolute prices.";
+  }
+
+  function renderPurchasingAttribution(snapshots){
+    const el = $("ppAttribution");
+    if (!el || snapshots.length < 2) return;
+    const first = snapshots[0];
+    const last = snapshots[snapshots.length - 1];
+    const usdFactor = isFinite(first.basketUsd) && first.basketUsd > 0 ? last.basketUsd / first.basketUsd : NaN;
+    const btcFactor = isFinite(first.btcUsd) && first.btcUsd > 0 ? first.btcUsd / last.btcUsd : NaN;
+    const net = isFinite(first.basketSats) && first.basketSats > 0 ? last.basketSats / first.basketSats : NaN;
+    el.textContent = `Sats move is driven by two forces: basket USD moved x${isFinite(usdFactor)?usdFactor.toFixed(3):'—'}, and BTC/USD purchasing power factor contributed x${isFinite(btcFactor)?btcFactor.toFixed(3):'—'}. Combined net sats factor: x${isFinite(net)?net.toFixed(3):'—'}.`;
+  }
+
+  function renderPurchasingItems(snapshots, view){
+    const body = $("ppItemsTable");
+    if (!body) return;
+    if (snapshots.length < 2) {
+      body.innerHTML = '<tr><td colspan="7">Not enough data for item ranking.</td></tr>';
+      return;
+    }
+
+    const firstMap = new Map();
+    const lastMap = new Map();
+    const firstSnap = snapshots[0];
+    const lastSnap = snapshots[snapshots.length - 1];
+    (firstSnap.items || []).forEach(item => firstMap.set(item.itemKey, item));
+    (lastSnap.items || []).forEach(item => lastMap.set(item.itemKey, item));
+
+    const rows = [];
+    lastMap.forEach((latestItem, key) => {
+      const firstItem = firstMap.get(key);
+      if (!firstItem) return;
+      const usdCh = pctChange(Number(firstItem.usd), Number(latestItem.usd));
+      const satsCh = pctChange(Number(firstItem.sats), Number(latestItem.sats));
+      rows.push({
+        key,
+        item: latestItem.description,
+        usd: Number(latestItem.usd),
+        sats: Number(latestItem.sats),
+        usdCh,
+        satsCh,
+        vendor: latestItem.vendor || latestItem.source || "—",
+        stale: latestItem.is_stale
+      });
+    });
+
+    rows.sort((a,b) => (a.satsCh || 0) - (b.satsCh || 0));
+
+    body.innerHTML = rows.map(row => {
+      const usdCls = isFinite(row.usdCh) ? (row.usdCh > 0 ? "bad" : "good") : "";
+      const satsCls = isFinite(row.satsCh) ? (row.satsCh > 0 ? "bad" : "good") : "";
+      return `<tr>
+        <td>${escapeHtml(row.item)}</td>
+        <td>${fmtUsd(row.usd)}</td>
+        <td>${fmtSats(row.sats)}</td>
+        <td class="${usdCls}">${isFinite(row.usdCh) ? row.usdCh.toFixed(2) + '%' : '—'}</td>
+        <td class="${satsCls}">${isFinite(row.satsCh) ? row.satsCh.toFixed(2) + '%' : '—'}</td>
+        <td>${escapeHtml(row.vendor)}</td>
+        <td>${row.stale ? '<span class="warn">Yes</span>' : 'No'}</td>
+      </tr>`;
+    }).join("") || '<tr><td colspan="7">No comparable items in this range.</td></tr>';
+  }
+
+  function renderPurchasingWinners(snapshots){
+    const wrap = $("ppWinnersLosers");
+    if (!wrap || snapshots.length < 2) return;
+    const firstSnap = snapshots[0];
+    const lastSnap = snapshots[snapshots.length - 1];
+    const firstMap = new Map((firstSnap.items || []).map(item => [item.itemKey, item]));
+    const deltas = (lastSnap.items || []).map(item => {
+      const first = firstMap.get(item.itemKey);
+      const ch = first ? pctChange(Number(first.sats), Number(item.sats)) : NaN;
+      return { name: item.description, ch };
+    }).filter(x => isFinite(x.ch));
+
+    const muchCheaper = deltas.filter(x => x.ch <= -10).slice(0,3);
+    const slightlyCheaper = deltas.filter(x => x.ch > -10 && x.ch < 0).slice(0,3);
+    const expensive = deltas.filter(x => x.ch >= 0).sort((a,b) => b.ch-a.ch).slice(0,3);
+    const card = (title, list, cls) => `<div class="basket-stat ${cls}"><div class="label">${title}</div><div class="note">${list.length ? list.map(x => `${escapeHtml(x.name)} (${x.ch.toFixed(1)}%)`).join('<br>') : 'None in this range.'}</div></div>`;
+    wrap.innerHTML = [
+      card("Much cheaper in sats", muchCheaper, "infl-down"),
+      card("Slightly cheaper in sats", slightlyCheaper, "infl-flat"),
+      card("More expensive in sats", expensive, "infl-up")
+    ].join("");
+  }
+
+  function renderPurchasingQuality(snapshots){
+    const wrap = $("ppQuality");
+    if (!wrap) return;
+    const latest = snapshots.length ? snapshots[snapshots.length - 1] : null;
+    const stale = latest ? latest.staleCount : 0;
+    const missing = latest ? latest.missingCount : 0;
+    const currentItems = latest ? latest.itemCount : 0;
+    const vendorIssues = (purchasingPowerData?.quality?.vendorInconsistencyCount) || 0;
+    wrap.innerHTML = `
+      <div class="basket-stat"><div class="label">Current items</div><div class="val">${currentItems}</div></div>
+      <div class="basket-stat ${stale ? 'infl-up' : 'infl-down'}"><div class="label">Stale items</div><div class="val">${stale}</div></div>
+      <div class="basket-stat ${missing ? 'infl-up' : 'infl-down'}"><div class="label">Missing values</div><div class="val">${missing}</div></div>
+      <div class="basket-stat ${vendorIssues ? 'infl-up' : 'infl-down'}"><div class="label">Vendor inconsistency count</div><div class="val">${vendorIssues}</div></div>
+    `;
+  }
+
   $("btnFetch").addEventListener("click", fetchLatest);
   $("btnRecord").addEventListener("click", recordSnapshot);
   $("btnBasket").addEventListener("click", renderBasket);
   $("itemViewMode").addEventListener("change", renderItemHistoryWithProgress);
   $("basketBaselineMode").addEventListener("change", renderBasket);
+  $("ppRange").addEventListener("change", renderPurchasingPowerDashboard);
+  $("ppViewMode").addEventListener("change", renderPurchasingPowerDashboard);
+  $("ppStaleMode").addEventListener("change", renderPurchasingPowerDashboard);
+  $("ppItemSelect").addEventListener("change", renderPurchasingPowerDashboard);
+  $("ppGroupSelect").addEventListener("change", renderPurchasingPowerDashboard);
 
   (async () => {
     try {
