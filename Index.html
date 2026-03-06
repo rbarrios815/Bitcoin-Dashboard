@@ -261,13 +261,27 @@
     .basket-stat .metric .inline-sats.value-up{ color: var(--bad); }
     .basket-stat .metric .inline-sats.value-down{ color: var(--good); }
     .basket-stat .metric .inline-sats.value-flat{ color: var(--text); }
-    .basket-stat .metric .inflation-label{ color:#d2b48c; }
-    .basket-stat .metric.infl-up strong,
-    .basket-stat .metric.infl-up div{ color: var(--bad); }
-    .basket-stat .metric.infl-down strong,
-    .basket-stat .metric.infl-down div{ color: var(--good); }
-    .basket-stat .metric.infl-flat strong,
-    .basket-stat .metric.infl-flat div{ color: var(--muted); }
+    .basket-stat .metric .inflation-label{ color:var(--muted); }
+    .pp-key-lines{
+      margin-top:10px;
+      display:grid;
+      gap:8px;
+    }
+    .pp-key-line{
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:12px;
+      padding:10px;
+      background: rgba(0,0,0,.12);
+      font-size:13px;
+      color:var(--text);
+      font-weight:700;
+    }
+    .pp-key-line .label{ color:var(--muted); font-weight:800; margin-right:6px; }
+    .pp-key-line.highlight{
+      border-color: rgba(125,211,252,.6);
+      box-shadow: inset 0 0 0 1px rgba(125,211,252,.2);
+      background: linear-gradient(135deg, rgba(125,211,252,0.18), rgba(196,181,253,0.14));
+    }
     .first-available{
       margin-top:6px;
       font-size:12px;
@@ -377,13 +391,7 @@
           <div class="progress-meta" id="fetchProgressMeta">Fetching latest snapshot…</div>
         </div>
       </div>
-      <div class="row">
-        <div class="admin-controls" id="adminControls" aria-hidden="false">
-          <button class="btn" id="btnFetch">Fetch Latest</button>
-          <button class="btn" id="btnRecord">Record Snapshot</button>
-          <button class="btn" id="btnBasket">Refresh Basket</button>
-        </div>
-      </div>
+      <div class="row"></div>
     </div>
 
 
@@ -417,6 +425,7 @@
         </div>
       </div>
       <div class="kpis" id="ppHeroKpis"></div>
+      <div class="pp-key-lines" id="ppKeyLines"></div>
       <div class="note" id="ppInsight"></div>
       <div class="note" id="ppStaleNote"></div>
 
@@ -439,12 +448,12 @@
           <thead>
             <tr>
               <th>Item</th>
+              <th>Earliest USD</th>
+              <th>Earliest sats</th>
               <th>Latest USD</th>
               <th>Latest sats</th>
               <th>USD %</th>
               <th>Sats %</th>
-              <th>Vendor</th>
-              <th>Stale</th>
             </tr>
           </thead>
           <tbody id="ppItemsTable"></tbody>
@@ -493,11 +502,6 @@
         <canvas id="basketContributionChart"></canvas>
       </div>
       <div class="note" id="basketContributionNote"></div>
-    </div>
-
-    <div class="row view-controls">
-      <span class="filter-label">Commodity view</span>
-      <div class="toggle-group" id="commodityToggle" role="group" aria-label="Commodity view toggle"></div>
     </div>
 
     <div class="grid">
@@ -886,7 +890,7 @@
       return;
     }
     const cfg = getCommodityConfig();
-    selectedChartNote.textContent = `This chart tracks the selected item's price over time in ${cfg.label} (${cfg.unitLabel}). Each point is a recorded snapshot; gaps indicate missing or filtered snapshots. Use the commodity view toggle to reframe the chart in another unit.`;
+    selectedChartNote.textContent = `This chart tracks the selected item's price over time in ${cfg.label} (${cfg.unitLabel}). Each point is a recorded snapshot; gaps indicate missing or filtered snapshots.`;
   }
 
   function renderCommodityToggle(){
@@ -1183,7 +1187,7 @@
 
   async function fetchLatest(){
     setStatus("Fetching latest snapshot (cached 10 minutes)...");
-    $("btnFetch").disabled = true;
+    if ($("btnFetch")) $("btnFetch").disabled = true;
     startFetchProgress();
     const fetchStart = Date.now();
     let fetchSuccess = false;
@@ -1218,14 +1222,14 @@
     } catch (err) {
       setStatus("<b style='color:#fb7185'>Fetch failed:</b> " + escapeHtml(String(err)));
     } finally {
-      $("btnFetch").disabled = false;
+      if ($("btnFetch")) $("btnFetch").disabled = false;
       stopFetchProgress(Date.now() - fetchStart, fetchSuccess);
     }
   }
 
   async function recordSnapshot(){
     setStatus("Recording snapshot to permanent history...");
-    $("btnRecord").disabled = true;
+    if ($("btnRecord")) $("btnRecord").disabled = true;
 
     try{
       const res = await new Promise((resolve, reject) => {
@@ -1240,7 +1244,7 @@
     } catch (err) {
       setStatus("<b style='color:#fb7185'>Record failed:</b> " + escapeHtml(String(err)));
     } finally {
-      $("btnRecord").disabled = false;
+      if ($("btnRecord")) $("btnRecord").disabled = false;
     }
   }
 
@@ -1732,7 +1736,7 @@
           </div>
           <div class="metric ${boxCls}">
             <div class="inflation-label">Inflation vs baseline</div>
-            <strong>${inflation.toFixed(2)}%</strong>
+            <strong class="${inflCls}">${inflation.toFixed(2)}%</strong>
           </div>
         </div>
       `;
@@ -2104,18 +2108,18 @@
 
   function renderPurchasingHero(snapshots){
     const wrap = $("ppHeroKpis");
+    const keyLines = $("ppKeyLines");
     if (!wrap) return;
     if (!snapshots.length) {
       wrap.innerHTML = '<div class="kpi"><div class="label">No data in this filter.</div><div class="val">—</div></div>';
+      if (keyLines) keyLines.innerHTML = "";
       $("ppInsight").textContent = "No snapshots match the selected filters.";
       return;
     }
     const first = snapshots[0];
     const last = snapshots[snapshots.length - 1];
     const metrics = [
-      { label: "Current BTC/USD", value: fmtUsd(last.btcUsd), ch: pctChange(first.btcUsd, last.btcUsd) },
-      { label: "Current basket USD", value: fmtUsd(last.basketUsd), ch: pctChange(first.basketUsd, last.basketUsd) },
-      { label: "Current basket sats", value: fmtSats(last.basketSats), ch: pctChange(first.basketSats, last.basketSats) }
+      { label: "Snapshots in range", value: String(snapshots.length), ch: NaN }
     ];
     wrap.innerHTML = metrics.map(metric => {
       const ch = metric.ch;
@@ -2123,6 +2127,14 @@
       const txt = isFinite(ch) ? `${ch > 0 ? '+' : ''}${ch.toFixed(2)}%` : "—";
       return `<div class="kpi"><div class="label">${metric.label}</div><div class="val">${metric.value}</div><div class="label ${cls}">${txt}</div></div>`;
     }).join("");
+
+    if (keyLines) {
+      keyLines.innerHTML = `
+        <div class="pp-key-line highlight"><span class="label">Current BTC/USD:</span>${escapeHtml(fmtUsd(last.btcUsd))}</div>
+        <div class="pp-key-line"><span class="label">Current basket:</span>${escapeHtml(fmtUsd(last.basketUsd))} · ${escapeHtml(fmtSats(last.basketSats))}</div>
+        <div class="pp-key-line"><span class="label">Original basket:</span>${escapeHtml(fmtUsd(first.basketUsd))} · ${escapeHtml(fmtSats(first.basketSats))}</div>
+      `;
+    }
 
     $("ppInsight").textContent = buildPurchasingInsight(first, last);
     $("ppStaleNote").textContent = last.staleCount > 0
@@ -2211,12 +2223,12 @@
       rows.push({
         key,
         item: latestItem.description,
+        earliestUsd: Number(firstItem.usd),
+        earliestSats: Number(firstItem.sats),
         usd: Number(latestItem.usd),
         sats: Number(latestItem.sats),
         usdCh,
-        satsCh,
-        vendor: latestItem.vendor || latestItem.source || "—",
-        stale: latestItem.is_stale
+        satsCh
       });
     });
 
@@ -2227,12 +2239,12 @@
       const satsCls = isFinite(row.satsCh) ? (row.satsCh > 0 ? "bad" : "good") : "";
       return `<tr>
         <td>${escapeHtml(row.item)}</td>
+        <td>${fmtUsd(row.earliestUsd)}</td>
+        <td>${fmtSats(row.earliestSats)}</td>
         <td>${fmtUsd(row.usd)}</td>
         <td>${fmtSats(row.sats)}</td>
         <td class="${usdCls}">${isFinite(row.usdCh) ? row.usdCh.toFixed(2) + '%' : '—'}</td>
         <td class="${satsCls}">${isFinite(row.satsCh) ? row.satsCh.toFixed(2) + '%' : '—'}</td>
-        <td>${escapeHtml(row.vendor)}</td>
-        <td>${row.stale ? '<span class="warn">Yes</span>' : 'No'}</td>
       </tr>`;
     }).join("") || '<tr><td colspan="7">No comparable items in this range.</td></tr>';
   }
@@ -2276,9 +2288,9 @@
     `;
   }
 
-  $("btnFetch").addEventListener("click", fetchLatest);
-  $("btnRecord").addEventListener("click", recordSnapshot);
-  $("btnBasket").addEventListener("click", renderBasket);
+  $("btnFetch")?.addEventListener("click", fetchLatest);
+  $("btnRecord")?.addEventListener("click", recordSnapshot);
+  $("btnBasket")?.addEventListener("click", renderBasket);
   $("itemViewMode").addEventListener("change", renderItemHistoryWithProgress);
   $("basketBaselineMode").addEventListener("change", renderBasket);
   $("ppRange").addEventListener("change", renderPurchasingPowerDashboard);
