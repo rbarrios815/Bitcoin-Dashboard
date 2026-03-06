@@ -84,13 +84,10 @@
       border: 1px solid rgba(255,255,255,0.25);
     }
     .admin-controls{
-      display:none;
+      display:flex;
       gap:10px;
       flex-wrap:wrap;
       align-items:center;
-    }
-    .admin-controls.is-visible{
-      display:flex;
     }
 
     select{
@@ -237,22 +234,20 @@
       color:var(--text);
       font-size:14px;
     }
-    .basket-stat .hover-hints{
-      margin-top:10px;
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
+    .basket-stat .metric .label-text{
+      color:#d2b48c;
     }
-    .basket-stat .hint-pill{
-      font-size:11px;
-      padding:3px 8px;
-      border-radius:999px;
-      border:1px dashed rgba(255,255,255,.28);
-      color:var(--muted);
-      background:rgba(0,0,0,.18);
-      cursor:help;
-      user-select:none;
+    .basket-stat .metric .label-text.is-current{
+      color:var(--text);
     }
+    .basket-stat .metric .label-text.hoverable{
+      text-decoration: underline dotted;
+      text-underline-offset: 2px;
+      cursor: help;
+    }
+    .basket-stat .metric strong.value-up{ color: var(--bad); }
+    .basket-stat .metric strong.value-down{ color: var(--good); }
+    .basket-stat .metric strong.value-flat{ color: var(--text); }
     .first-available{
       margin-top:6px;
       font-size:12px;
@@ -363,8 +358,7 @@
         </div>
       </div>
       <div class="row">
-        <button class="btn secondary" id="btnAdminToggle" aria-expanded="false">Admin Only - Click Here</button>
-        <div class="admin-controls" id="adminControls" aria-hidden="true">
+        <div class="admin-controls" id="adminControls" aria-hidden="false">
           <button class="btn" id="btnFetch">Fetch Latest</button>
           <button class="btn" id="btnRecord">Record Snapshot</button>
           <button class="btn" id="btnBasket">Refresh Basket</button>
@@ -503,7 +497,7 @@
   const GOLD_UNIT_GRAMS = 0.1;
   const COMMODITIES = [
     { id: "grocery", label: "Grocery Items", unitLabel: "USD per item", unitShort: "$/item", precision: 2 },
-    { id: "sats", label: "Satoshis", unitLabel: "10,000 sats", unitShort: "x10k sats", precision: 2 },
+    { id: "sats", label: "Satoshis", unitLabel: "sats", unitShort: "sats", precision: 2 },
     { id: "dollars", label: "Dollars", unitLabel: "$", unitShort: "$", precision: 2 },
     { id: "gold", label: "Gold", unitLabel: "grams of gold", unitShort: "g gold", precision: 4 },
     { id: "silver", label: "Silver", unitLabel: "1 gram silver", unitShort: "g silver", precision: 4 },
@@ -538,6 +532,13 @@
     const cfg = getCommodityConfigById(mode);
     if (cfg.id === "dollars") return fmtUsd(n);
     if (cfg.id === "grocery") return fmtUsd(n);
+    if (cfg.id === "sats") return `${Math.round(n).toLocaleString()} sats`;
+    if (cfg.id === "mwh") {
+      const abs = Math.abs(n);
+      if (abs > 0 && abs < 0.01) {
+        return `${(n * 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh`;
+      }
+    }
     return n.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
   }
   function fmtDate(d){
@@ -870,7 +871,7 @@
     if (!isFinite(usd) && !isFinite(sats)) return NaN;
     switch (mode) {
       case "sats":
-        return isFinite(sats) ? (sats / 10000) : NaN;
+        return isFinite(sats) ? sats : NaN;
       case "dollars":
         return isFinite(usd) ? usd : NaN;
       case "gold": {
@@ -883,7 +884,7 @@
       }
       case "mwh": {
         const ref = getReferenceUsd("mwh", ts);
-        return isFinite(usd) && isFinite(ref) && ref > 0 ? ((usd / 100) / ref) : NaN;
+        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) : NaN;
       }
       case "grocery":
       default:
@@ -929,10 +930,7 @@
         referenceHistory.silver = entry.history || [];
       }
       if (mwhDescription && key === normalizeKey(mwhDescription)) {
-        referenceHistory.mwh = (entry.history || []).map(point => ({
-          ...point,
-          usd: isFinite(Number(point.usd)) ? Number(point.usd) / 100 : point.usd
-        }));
+        referenceHistory.mwh = entry.history || [];
       }
     });
   }
@@ -961,7 +959,7 @@
       const cashUsd = 10;
       const cashSats = isFinite(latest?.btcUsd) ? (cashUsd / latest.btcUsd) * 100000000 : NaN;
       const usd = isCashTen ? cashUsd : row?.usd;
-      const normalizedUsd = it.id === "mwh" && isFinite(Number(usd)) ? Number(usd) / 100 : usd;
+      const normalizedUsd = usd;
       const sats = isCashTen ? cashSats : row?.sats;
       const stale = isCashTen ? false : Boolean(row?.is_stale);
       const source = row?.price_source || "";
@@ -970,7 +968,7 @@
       const sourceUrl = getSourceUrl(row);
       const first = row?.first_available;
       const firstDate = fmtDate(first?.ts);
-      const firstUsd = it.id === "mwh" && first && isFinite(Number(first.usd)) ? Number(first.usd) / 100 : first?.usd;
+      const firstUsd = first?.usd;
       const firstCommodity = first ? fmtCommodity(getCommodityValue(firstUsd, first.sats, first.ts)) : "—";
       const firstCommodityValue = first ? getCommodityValue(firstUsd, first.sats, first.ts) : NaN;
       const firstSats = first?.sats != null ? fmtSats(first.sats) : "—";
@@ -1181,7 +1179,7 @@
   function normalizeUsdForHistory(description, usd){
     const numericUsd = Number(usd);
     if (!isFinite(numericUsd)) return numericUsd;
-    return isMwhDescription(description) ? (numericUsd / 100) : numericUsd;
+    return numericUsd;
   }
 
   function buildItemChart(canvas, hist, description = ""){
@@ -1366,7 +1364,7 @@
     } else {
       const orderedHistory = [...hist].sort((a, b) => new Date(b.ts) - new Date(a.ts));
       rowsRoot.innerHTML = orderedHistory.map(point => {
-        const normalizedUsd = activeItemId === "mwh" && isFinite(Number(point.usd)) ? Number(point.usd) / 100 : Number(point.usd);
+        const normalizedUsd = Number(point.usd);
         const vendorLabel = isValidVendor(point.price_vendor) ? point.price_vendor : "—";
         const providerLabel = point.price_source ? point.price_source : "—";
         const sourceUrl = hasSourceUrl(point) ? point.source_url : "";
@@ -1470,15 +1468,17 @@
       silver: "#94a3b8",
       mwh: "#22d3ee"
     };
-    const datasets = COMMODITIES.map(mode => {
+    const chartModes = COMMODITIES.filter(mode => mode.id !== "dollars");
+    const datasets = chartModes.map(mode => {
       const color = commodityColors[mode.id] || "#7dd3fc";
+      const label = mode.id === "grocery" ? "Basket (Grocery Items / Dollars)" : `Basket (${mode.label})`;
       const series = hist.map((point, idx) => {
         const usd = usdSeries[idx];
         const sats = satsSeries[idx];
         return getCommodityValueForMode(mode.id, usd, sats, point.ts);
       });
       return {
-        label: `Basket (${mode.label})`,
+        label,
         data: series,
         borderColor: color,
         backgroundColor: hexToRgba(color, 0.18),
@@ -1603,36 +1603,30 @@
       const last = [...series].reverse().find(val => isFinite(val));
       const baseline = getFiniteValueAtSeriesIndex(series, baselineIndex);
       const inflation = getInflationPctFromSeries(series);
-      const inflCls = inflation >= 0 ? "bad" : "good";
+      const inflCls = inflation > 0 ? "bad" : (inflation < 0 ? "good" : "");
       const boxCls = inflation > 0 ? "infl-up" : (inflation < 0 ? "infl-down" : "infl-flat");
+      const trendCls = inflation > 0 ? "value-up" : (inflation < 0 ? "value-down" : "value-flat");
       const lastSats = mode.id === "sats"
         ? [...satsSeries].reverse().find(val => isFinite(val))
         : null;
       const btcValue = isFinite(lastSats) ? lastSats / 100000000 : NaN;
+      const basketIndexTitle = escapeHtml(currentItemsTitle);
+      const baselineTitle = escapeHtml(baselineItemsTitle);
+      const satsInline = mode.id === "sats" ? ` <span class="label-text">= ${escapeHtml(fmtBtc(btcValue))}</span>` : "";
       return `
         <div class="basket-stat ${boxCls}">
           <div class="label">${escapeHtml(mode.label)}</div>
           <div class="metric">
-            <div>Basket index</div>
-            <strong>${escapeHtml(fmtCommodityForMode(last, mode.id))}</strong>
+            <div class="label-text is-current hoverable" title="${basketIndexTitle}">Basket index</div>
+            <strong class="${trendCls}">${escapeHtml(fmtCommodityForMode(last, mode.id))}</strong>${satsInline}
           </div>
           <div class="metric">
-            <div>Original baseline basket index</div>
-            <strong>${escapeHtml(fmtCommodityForMode(baseline, mode.id))}</strong>
+            <div class="label-text hoverable" title="${baselineTitle}">Original baseline basket index</div>
+            <strong>${escapeHtml(fmtCommodityForMode(baseline, mode.id))}</strong>${satsInline}
           </div>
-          ${mode.id === "sats" ? `
-          <div class="metric">
-            <div>BTC equivalent</div>
-            <strong>${escapeHtml(fmtBtc(btcValue))}</strong>
-          </div>
-          ` : ""}
           <div class="metric">
             <div>Inflation vs baseline</div>
             <strong class="${inflCls}">${inflation.toFixed(2)}%</strong>
-          </div>
-          <div class="hover-hints">
-            <span class="hint-pill" title="${escapeHtml(baselineItemsTitle)}">Hover: initial basket items</span>
-            <span class="hint-pill" title="${escapeHtml(currentItemsTitle)}">Hover: current basket items</span>
           </div>
         </div>
       `;
@@ -1897,21 +1891,10 @@
     };
   }
 
-  function toggleAdminControls(){
-    const controls = $("adminControls");
-    const toggle = $("btnAdminToggle");
-    if (!controls || !toggle) return;
-    const isVisible = controls.classList.toggle("is-visible");
-    controls.setAttribute("aria-hidden", String(!isVisible));
-    toggle.setAttribute("aria-expanded", String(isVisible));
-    toggle.textContent = isVisible ? "Admin Only - Hide Buttons" : "Admin Only - Click Here";
-  }
-
   $("btnFetch").addEventListener("click", fetchLatest);
   $("btnRecord").addEventListener("click", recordSnapshot);
   $("btnBasket").addEventListener("click", renderBasket);
   $("itemViewMode").addEventListener("change", renderItemHistoryWithProgress);
-  $("btnAdminToggle").addEventListener("click", toggleAdminControls);
   $("basketBaselineMode").addEventListener("change", renderBasket);
 
   (async () => {
