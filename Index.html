@@ -1164,9 +1164,29 @@
     return canvas;
   }
 
-  function buildItemChart(canvas, hist){
+  function isMwhDescription(description){
+    const normalized = normalizeKey(description);
+    const mwhItem = cfg.items.find(item => item.id === "mwh");
+    const latestMwhRow = latest?.items?.find(item => item.id === "mwh");
+    const aliases = [
+      "mwh",
+      mwhItem?.name,
+      mwhItem?.label,
+      latestMwhRow?.item_description,
+      mwhItem?.description
+    ].filter(Boolean).map(normalizeKey);
+    return aliases.includes(normalized);
+  }
+
+  function normalizeUsdForHistory(description, usd){
+    const numericUsd = Number(usd);
+    if (!isFinite(numericUsd)) return numericUsd;
+    return isMwhDescription(description) ? (numericUsd / 100) : numericUsd;
+  }
+
+  function buildItemChart(canvas, hist, description = ""){
     const labels = hist.map(p => new Date(p.ts).toLocaleString());
-    const commoditySeries = hist.map(p => getCommodityValue(Number(p.usd), Number(p.sats), p.ts));
+    const commoditySeries = hist.map(p => getCommodityValue(normalizeUsdForHistory(description, p.usd), Number(p.sats), p.ts));
     const cfg = getCommodityConfig();
 
     const chart = new Chart(canvas.getContext("2d"), {
@@ -1223,7 +1243,7 @@
       const color = palette[idx % palette.length];
       const map = new Map((item.history || []).map(point => [
         point.ts,
-        getCommodityValue(Number(point.usd), Number(point.sats), point.ts)
+        getCommodityValue(normalizeUsdForHistory(item.description, point.usd), Number(point.sats), point.ts)
       ]));
       return {
         label: item.description,
@@ -1288,7 +1308,7 @@
         const hist = historyMap.get(description) || [];
         staleCount += hist.filter(x => x.is_stale).length;
         const canvas = createChartSection(description, true);
-        buildItemChart(canvas, hist);
+        buildItemChart(canvas, hist, description);
       });
 
       buildAllItemsChart(allHistories);
@@ -1321,7 +1341,7 @@
     $("itemNote").innerHTML = notes.join(" • ");
 
     const canvas = createChartSection("", false);
-    buildItemChart(canvas, hist);
+    buildItemChart(canvas, hist, description);
     updateSelectedChartNote();
 
     const vendorSet = new Set();
