@@ -165,6 +165,14 @@
       font-weight: 700;
       text-decoration: none;
     }
+    .source-link.muted,
+    .muted-text{
+      color: var(--muted);
+    }
+    .metric-blue{
+      color: var(--accent);
+      font-weight:700;
+    }
     .source-link:hover{ text-decoration: underline; }
 
     .kpis{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
@@ -250,6 +258,10 @@
     .basket-stat .metric strong.value-flat{ color: var(--text); }
     .basket-stat .metric strong.baseline-value{ color:#d2b48c; }
     .basket-stat .metric .inline-sats{ margin-left:6px; }
+    .basket-stat .metric .inline-sats.value-up{ color: var(--bad); }
+    .basket-stat .metric .inline-sats.value-down{ color: var(--good); }
+    .basket-stat .metric .inline-sats.value-flat{ color: var(--text); }
+    .basket-stat .metric .inflation-label{ color:#d2b48c; }
     .basket-stat .metric.infl-up strong,
     .basket-stat .metric.infl-up div{ color: var(--bad); }
     .basket-stat .metric.infl-down strong,
@@ -998,9 +1010,9 @@
       const latestGoldValue = getCommodityValueForMode("gold", normalizedUsd, sats, latestTs);
       const latestSilverValue = getCommodityValueForMode("silver", normalizedUsd, sats, latestTs);
       const latestMwhValue = getCommodityValueForMode("mwh", normalizedUsd, sats, latestTs);
-      const latestGoldClass = commodityMode === "gold" ? priceCompareClass(latestGoldValue, firstGoldValue) : "";
-      const latestSilverClass = commodityMode === "silver" ? priceCompareClass(latestSilverValue, firstSilverValue) : "";
-      const latestMwhClass = commodityMode === "mwh" ? priceCompareClass(latestMwhValue, firstMwhValue) : "";
+      const latestGoldClass = priceCompareClass(latestGoldValue, firstGoldValue);
+      const latestSilverClass = priceCompareClass(latestSilverValue, firstSilverValue);
+      const latestMwhClass = priceCompareClass(latestMwhValue, firstMwhValue);
       const latestGold = fmtCommodityForMode(latestGoldValue, "gold");
       const latestSilver = fmtCommodityForMode(latestSilverValue, "silver");
       const latestMwh = fmtCommodityForMode(latestMwhValue, "mwh");
@@ -1019,18 +1031,20 @@
         <div class="meta">
           <span>
             Latest: <span class="${commodityClass}">${fmtCommodity(commodityValue)}</span> •
-            <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span> /
-            <span class="${latestGoldClass}">${latestGold}</span> /
-            <span class="${latestSilverClass}">${latestSilver}</span> /
+            <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span> •
+            <span class="${latestGoldClass}">${latestGold}</span> •
+            <span class="${latestSilverClass}">${latestSilver}</span> •
             <span class="${latestMwhClass}">${latestMwh}</span>
             <span>as of ${escapeHtml(latestTsLabel)}</span>
           </span>
         </div>
         <div class="first-available">
-          <span class="label-text">Earliest: ${firstCommodity} • ${firstSats} / ${firstGold} / ${firstSilver} / ${firstMwh} on ${firstDate}</span>
+          <span class="label-text">Earliest: ${firstCommodity} • ${firstSats} • ${firstGold} • ${firstSilver} • ${firstMwh} on ${firstDate}</span>
           <span>
-            Vendors seen: ${vendorCount}
-            ${sourceUrl ? `• <a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source URL</a>` : "• No source URL"}
+            <span class="${vendorCount > 0 && sourceUrl ? "metric-blue" : "muted-text"}">Vendors seen: ${vendorCount}</span>
+            ${sourceUrl
+              ? `• <a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source URL</a>`
+              : `• <span class="muted-text">No source URL</span>`}
           </span>
         </div>
       `;
@@ -1642,7 +1656,7 @@
             <strong class="baseline-value">${escapeHtml(fmtCommodityForMode(baseline, mode.id))}</strong>${baselineSatsInline}
           </div>
           <div class="metric ${boxCls}">
-            <div>Inflation vs baseline</div>
+            <div class="inflation-label">Inflation vs baseline</div>
             <strong>${inflation.toFixed(2)}%</strong>
           </div>
         </div>
