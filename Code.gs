@@ -639,6 +639,261 @@ function getBasketInflation() {
   };
 }
 
+
+
+function getPurchasingPowerDashboardData() {
+  const props = getProps_();
+  validateSheetProps_(props);
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(props.dataSheetName);
+  if (!sheet || sheet.getLastRow() < 2) {
+    return {
+      generatedAt: new Date().toISOString(),
+      snapshots: [],
+      items: [],
+      quality: {
+        currentItems: 0,
+        staleItems: 0,
+        missingItems: 0,
+        vendorInconsistencyCount: 0,
+        currentSnapshotHasStale: false
+      },
+      fieldsDetected: {}
+    };
+  }
+
+  const values = sheet.getDataRange().getValues();
+  const header = values[0].map(h => String(h || '').trim());
+  const idx = buildDashboardHeaderIndex_(header);
+
+  const configuredItems = parseItems_(props.itemList)
+    .filter(item => !isReferenceItemId_(item.id))
+    .map(item => ({ id: item.id, name: item.name }));
+  const configuredNameById = {};
+  configuredItems.forEach(item => configuredNameById[item.id] = item.name);
+
+  const snapshotsByTs = {};
+  const itemHistoryByKey = {};
+  const vendorSetByItem = {};
+
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const ts = parseSheetDate_(idx.timestamp != null ? row[idx.timestamp] : null);
+    if (!ts) continue;
+
+    const rowIso = ts.toISOString();
+    if (!snapshotsByTs[rowIso]) {
+      snapshotsByTs[rowIso] = {
+        ts: rowIso,
+        btcUsd: safeNumber_(idx.btc_usd != null ? row[idx.btc_usd] : null),
+        basketUsd: safeNumber_(idx.basket_index_usd != null ? row[idx.basket_index_usd] : null),
+        basketSats: safeNumber_(idx.basket_index_sats != null ? row[idx.basket_index_sats] : null),
+        itemRows: []
+      };
+    }
+
+    const itemId = idx.item_id != null ? String(row[idx.item_id] || '').trim() : '';
+    if (isReferenceItemId_(itemId)) continue;
+
+    const itemName = idx.item_name != null ? String(row[idx.item_name] || '').trim() : '';
+    const description = idx.item_description != null ? String(row[idx.item_description] || '').trim() : '';
+    const source = idx.price_source != null ? String(row[idx.price_source] || '').trim() : '';
+    const vendor = idx.price_vendor != null ? String(row[idx.price_vendor] || '').trim() : '';
+    const group = idx.group != null ? String(row[idx.group] || '').trim() : '';
+    const isStale = idx.is_stale != null ? Boolean(row[idx.is_stale]) : /^last_known/i.test(source);
+    const usd = deriveUsdValue_(row, idx);
+    const btcUsd = safeNumber_(idx.btc_usd != null ? row[idx.btc_usd] : null);
+    const sats = deriveSatsValue_(row, idx, usd, btcUsd);
+
+    const fallbackKey = description || itemName || itemId || `row_${r}`;
+    const itemKey = normalizeDescription_(fallbackKey);
+    if (!itemHistoryByKey[itemKey]) {
+      itemHistoryByKey[itemKey] = {
+        key: itemKey,
+        itemId: itemId || '',
+        itemName: itemName || configuredNameById[itemId] || description || itemId || 'Unknown Item',
+        description: description || itemName || itemId || 'Unknown Item',
+        history: []
+      };
+    }
+    itemHistoryByKey[itemKey].history.push({
+      ts: rowIso,
+      usd: usd,
+      sats: sats,
+      btcUsd: btcUsd,
+      vendor: vendor,
+      source: source,
+      group: group,
+      is_stale: isStale
+    });
+
+    if (!vendorSetByItem[itemKey]) vendorSetByItem[itemKey] = {};
+    if (vendor) vendorSetByItem[itemKey][vendor] = true;
+
+    snapshotsByTs[rowIso].itemRows.push({
+      itemKey: itemKey,
+      itemId: itemId,
+      itemName: itemName || description || itemId || 'Unknown Item',
+      description: description || itemName || itemId || 'Unknown Item',
+      usd: usd,
+      sats: sats,
+      btcUsd: btcUsd,
+      vendor: vendor,
+      source: source,
+      group: group,
+      is_stale: isStale
+    });
+  }
+
+  const snapshotKeys = Object.keys(snapshotsByTs).sort((a, b) => new Date(a) - new Date(b));
+  const snapshots = snapshotKeys.map(tsIso => {
+    const entry = snapshotsByTs[tsIso];
+    const rows = entry.itemRows;
+    const validUsd = rows.map(r => r.usd).filter(isFinite);
+    const validSats = rows.map(r => r.sats).filter(isFinite);
+    const staleCount = rows.filter(r => r.is_stale).length;
+    const missingCount = rows.filter(r => !isFinite(r.usd) || !isFinite(r.sats)).length;
+
+    return {
+      ts: tsIso,
+      btcUsd: isFinite(entry.btcUsd) ? entry.btcUsd : average_(rows.map(r => r.btcUsd)),
+      basketUsd: isFinite(entry.basketUsd) ? entry.basketUsd : average_(validUsd),
+      basketSats: isFinite(entry.basketSats) ? entry.basketSats : average_(validSats),
+      itemCount: rows.length,
+      staleCount: staleCount,
+      missingCount: missingCount,
+      groups: uniqueValues_(rows.map(r => r.group)),
+      items: rows
+    };
+  });
+
+  const itemList = Object.keys(itemHistoryByKey).map(key => {
+    const entry = itemHistoryByKey[key];
+    entry.history.sort((a, b) => new Date(a.ts) - new Date(b.ts));
+    const latest = entry.history[entry.history.length - 1] || {};
+    return {
+      key: entry.key,
+      itemId: entry.itemId,
+      itemName: entry.itemName,
+      description: entry.description,
+      vendorCount: vendorSetByItem[key] ? Object.keys(vendorSetByItem[key]).length : 0,
+      vendorChanged: vendorSetByItem[key] ? Object.keys(vendorSetByItem[key]).length > 1 : false,
+      latestUsd: safeNumber_(latest.usd),
+      latestSats: safeNumber_(latest.sats),
+      latestVendor: latest.vendor || '',
+      latestSource: latest.source || '',
+      latestIsStale: Boolean(latest.is_stale),
+      history: entry.history
+    };
+  }).sort((a, b) => a.description.localeCompare(b.description));
+
+  const latestSnapshot = snapshots.length ? snapshots[snapshots.length - 1] : null;
+  const quality = {
+    currentItems: latestSnapshot ? latestSnapshot.itemCount : 0,
+    staleItems: latestSnapshot ? latestSnapshot.staleCount : 0,
+    missingItems: latestSnapshot ? latestSnapshot.missingCount : 0,
+    vendorInconsistencyCount: itemList.filter(item => item.vendorChanged).length,
+    currentSnapshotHasStale: latestSnapshot ? latestSnapshot.staleCount > 0 : false
+  };
+
+  return {
+    generatedAt: new Date().toISOString(),
+    snapshots: snapshots,
+    items: itemList,
+    quality: quality,
+    fieldsDetected: {
+      timestamp: idx.timestamp != null,
+      item_name: idx.item_name != null,
+      item_description: idx.item_description != null,
+      price_vendor: idx.price_vendor != null,
+      usd: idx.usd != null,
+      btc_usd: idx.btc_usd != null,
+      sats: idx.sats != null,
+      basket_index_usd: idx.basket_index_usd != null,
+      basket_index_sats: idx.basket_index_sats != null,
+      is_stale: idx.is_stale != null,
+      group: idx.group != null
+    }
+  };
+}
+
+function buildDashboardHeaderIndex_(headerRow) {
+  return {
+    timestamp: findHeaderIndex_(headerRow, ['timestamp', 'date', 'datetime', 'ts']),
+    btc_usd: findHeaderIndex_(headerRow, ['btc_usd', 'btc usd', 'btc/usd', 'exchange_rate', 'btc_rate']),
+    item_id: findHeaderIndex_(headerRow, ['item_id', 'item id', 'id']),
+    item_name: findHeaderIndex_(headerRow, ['item_name', 'item name', 'name']),
+    item_description: findHeaderIndex_(headerRow, ['item_description', 'item description', 'description']),
+    usd: findHeaderIndex_(headerRow, ['usd', 'price_usd', 'usd_price', 'price']),
+    sats: findHeaderIndex_(headerRow, ['sats', 'satoshis', 'sats_price']),
+    basket_index_usd: findHeaderIndex_(headerRow, ['basket_index_usd', 'basket usd', 'basket_total_usd', 'basket_usd']),
+    basket_index_sats: findHeaderIndex_(headerRow, ['basket_index_sats', 'basket sats', 'basket_total_sats', 'basket_sats']),
+    price_source: findHeaderIndex_(headerRow, ['price_source', 'source', 'vendor_source']),
+    price_vendor: findHeaderIndex_(headerRow, ['price_vendor', 'vendor', 'source_vendor']),
+    is_stale: findHeaderIndex_(headerRow, ['is_stale', 'stale', 'carried_forward']),
+    group: findHeaderIndex_(headerRow, ['category', 'group', 'product_group'])
+  };
+}
+
+function findHeaderIndex_(headerRow, candidates) {
+  const normalizedMap = {};
+  headerRow.forEach((label, idx) => {
+    normalizedMap[String(label || '').trim().toLowerCase()] = idx;
+  });
+  for (let i = 0; i < candidates.length; i++) {
+    const found = normalizedMap[String(candidates[i]).toLowerCase()];
+    if (found !== undefined) return found;
+  }
+  return null;
+}
+
+function deriveUsdValue_(row, idx) {
+  const direct = safeNumber_(idx.usd != null ? row[idx.usd] : null);
+  if (isFinite(direct)) return direct;
+  const sats = safeNumber_(idx.sats != null ? row[idx.sats] : null);
+  const btcUsd = safeNumber_(idx.btc_usd != null ? row[idx.btc_usd] : null);
+  if (isFinite(sats) && isFinite(btcUsd) && btcUsd > 0) {
+    return (sats / 100000000) * btcUsd;
+  }
+  return NaN;
+}
+
+function deriveSatsValue_(row, idx, usd, btcUsd) {
+  const direct = safeNumber_(idx.sats != null ? row[idx.sats] : null);
+  if (isFinite(direct)) return direct;
+  if (isFinite(usd) && isFinite(btcUsd) && btcUsd > 0) {
+    return usdToSats_(usd, btcUsd);
+  }
+  return NaN;
+}
+
+function parseSheetDate_(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function safeNumber_(value) {
+  const n = Number(value);
+  return isFinite(n) ? n : NaN;
+}
+
+function uniqueValues_(values) {
+  const out = {};
+  (values || []).forEach(v => {
+    const cleaned = String(v || '').trim();
+    if (!cleaned) return;
+    out[cleaned] = true;
+  });
+  return Object.keys(out).sort();
+}
+
+function isReferenceItemId_(itemId) {
+  const id = String(itemId || '').trim().toLowerCase();
+  return id === 'gold' || id === 'silver' || id === 'mwh' || id === 'cash10';
+}
+
 /* =========================
    RapidAPI batch fetch
    ========================= */
