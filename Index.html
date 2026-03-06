@@ -225,7 +225,9 @@
     .basket-stat .metric{
       margin-top:8px;
       display:flex;
-      flex-direction:column;
+      flex-direction:row;
+      align-items:baseline;
+      flex-wrap:wrap;
       gap:4px;
       font-size:12px;
       color:var(--muted);
@@ -237,9 +239,7 @@
     .basket-stat .metric .label-text{
       color:#d2b48c;
     }
-    .basket-stat .metric .label-text.is-current{
-      color:var(--text);
-    }
+    .basket-stat .metric .label-text.is-current{ color:#d2b48c; }
     .basket-stat .metric .label-text.hoverable{
       text-decoration: underline dotted;
       text-underline-offset: 2px;
@@ -248,10 +248,18 @@
     .basket-stat .metric strong.value-up{ color: var(--bad); }
     .basket-stat .metric strong.value-down{ color: var(--good); }
     .basket-stat .metric strong.value-flat{ color: var(--text); }
+    .basket-stat .metric strong.baseline-value{ color:#d2b48c; }
+    .basket-stat .metric .inline-sats{ margin-left:6px; }
+    .basket-stat .metric.infl-up strong,
+    .basket-stat .metric.infl-up div{ color: var(--bad); }
+    .basket-stat .metric.infl-down strong,
+    .basket-stat .metric.infl-down div{ color: var(--good); }
+    .basket-stat .metric.infl-flat strong,
+    .basket-stat .metric.infl-flat div{ color: var(--muted); }
     .first-available{
       margin-top:6px;
       font-size:12px;
-      color: var(--muted);
+      color: #d2b48c;
       font-weight:800;
       display:flex;
       flex-direction:column;
@@ -382,6 +390,7 @@
         Positive percentages are shown in red (inflation), while negative percentages are shown in green (deflation).
       </div>
       <div class="note" id="basketBaselineNote"></div>
+      <div class="note">How to read these charts: Basket Inflation shows the basket priced in each commodity view over time. Normalized Basket Index rebases the baseline snapshot to 100, so values above 100 mean higher cost vs baseline and below 100 mean lower cost. Basket Change by Item shows each item's USD contribution (delta) from baseline; positive values push inflation up, negative values pull it down.</div>
       <div class="basket-stats" id="basketStats"></div>
 
       <div style="height:12px"></div>
@@ -443,7 +452,7 @@
               <tr>
                 <th>Date/time</th>
                 <th id="historyCommodityLabel">Commodity</th>
-                <th>USD</th>
+                <th id="historyUsdLabel">USD</th>
                 <th>Sats</th>
                 <th>Gold (g)</th>
                 <th>Silver (g)</th>
@@ -776,6 +785,8 @@
     if (titleEl) titleEl.textContent = title;
     document.title = title;
     $("historyCommodityLabel").textContent = `${cfg.label} (${cfg.unitLabel})`;
+    const usdLabel = $("historyUsdLabel");
+    if (usdLabel) usdLabel.textContent = (cfg.id === "grocery" || cfg.id === "dollars") ? "" : "USD";
   }
 
   function updateSelectedChartNote(){
@@ -815,7 +826,7 @@
     commodityMode = mode;
     renderCommodityToggle();
     updateCommodityTitle();
-    await ensureCommodityReferences();
+    await ensureCommodityReferences(true);
     renderItems();
     await renderItemHistory();
     updateSelectedChartNote();
@@ -958,13 +969,13 @@
       const latestTs = row?.ts || latest?.ts;
       const cashUsd = 10;
       const cashSats = isFinite(latest?.btcUsd) ? (cashUsd / latest.btcUsd) * 100000000 : NaN;
-      const usd = isCashTen ? cashUsd : row?.usd;
+      const usd = isCashTen ? cashUsd : (isFinite(Number(row?.usd)) ? Number(row?.usd) : (isFinite(Number(row?.sats)) && isFinite(Number(latest?.btcUsd)) ? (Number(row.sats) * Number(latest.btcUsd) / 100000000) : NaN));
       const normalizedUsd = usd;
       const sats = isCashTen ? cashSats : row?.sats;
       const stale = isCashTen ? false : Boolean(row?.is_stale);
       const source = row?.price_source || "";
       const vendor = row?.price_vendor || "";
-      const description = row?.item_description || it.name;
+      const description = isCashTen ? "$10 fixed" : (row?.item_description || it.name);
       const sourceUrl = getSourceUrl(row);
       const first = row?.first_available;
       const firstDate = fmtDate(first?.ts);
@@ -1016,7 +1027,7 @@
           </span>
         </div>
         <div class="first-available">
-          <span>Earliest: ${firstCommodity} • ${firstSats} / ${firstGold} / ${firstSilver} / ${firstMwh} on ${firstDate}</span>
+          <span class="label-text">Earliest: ${firstCommodity} • ${firstSats} / ${firstGold} / ${firstSilver} / ${firstMwh} on ${firstDate}</span>
           <span>
             Vendors seen: ${vendorCount}
             ${sourceUrl ? `• <a class="source-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Source URL</a>` : "• No source URL"}
@@ -1068,7 +1079,7 @@
       if (!activeItemId && cfg.items.length) activeItemId = cfg.items[0].id;
       renderCommodityToggle();
       updateCommodityTitle();
-      await ensureCommodityReferences();
+      await ensureCommodityReferences(true);
       renderItems();
       await renderItemHistoryWithProgress();
       await renderBasket();
@@ -1103,7 +1114,7 @@
       if (!activeItemId && cfg.items.length) activeItemId = cfg.items[0].id;
       renderCommodityToggle();
       updateCommodityTitle();
-      await ensureCommodityReferences();
+      await ensureCommodityReferences(true);
       renderItems();
 
       await renderItemHistoryWithProgress();
@@ -1292,6 +1303,7 @@
 
       const descriptions = orderedItems.map(item => {
         const latestRow = latest?.items?.find(x => x.id === item.id);
+        if (item.id === "cash10") return "$10 fixed";
         return latestRow?.item_description || item?.name || "";
       }).filter(Boolean);
 
@@ -1322,7 +1334,7 @@
 
     const item = cfg.items.find(x => x.id === activeItemId);
     const latestRow = latest?.items?.find(x => x.id === activeItemId);
-    const description = latestRow?.item_description || item?.name || "Item history";
+    const description = activeItemId === "cash10" ? "$10 fixed" : (latestRow?.item_description || item?.name || "Item history");
 
     const hist = await new Promise((resolve, reject) => {
       google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getItemHistory(description);
@@ -1376,7 +1388,7 @@
           <tr>
             <td>${escapeHtml(fmtDateTime(point.ts))}</td>
             <td>${escapeHtml(fmtCommodity(commodityValue))}</td>
-            <td>${escapeHtml(fmtUsd(normalizedUsd))}</td>
+            <td>${(commodityMode === "grocery" || commodityMode === "dollars") ? "" : escapeHtml(fmtUsd(normalizedUsd))}</td>
             <td>${escapeHtml(fmtSats(point.sats))}</td>
             <td>${escapeHtml(fmtCommodityForMode(goldValue, "gold"))}</td>
             <td>${escapeHtml(fmtCommodityForMode(silverValue, "silver"))}</td>
@@ -1609,24 +1621,29 @@
       const lastSats = mode.id === "sats"
         ? [...satsSeries].reverse().find(val => isFinite(val))
         : null;
-      const btcValue = isFinite(lastSats) ? lastSats / 100000000 : NaN;
+      const baselineSats = mode.id === "sats"
+        ? getFiniteValueAtSeriesIndex(satsSeries, baselineIndex)
+        : null;
+      const currentBtcValue = isFinite(lastSats) ? lastSats / 100000000 : NaN;
+      const baselineBtcValue = isFinite(baselineSats) ? baselineSats / 100000000 : NaN;
       const basketIndexTitle = escapeHtml(currentItemsTitle);
       const baselineTitle = escapeHtml(baselineItemsTitle);
-      const satsInline = mode.id === "sats" ? ` <span class="label-text">= ${escapeHtml(fmtBtc(btcValue))}</span>` : "";
+      const currentSatsInline = mode.id === "sats" ? ` <span class="inline-sats ${trendCls}">= ${escapeHtml(fmtBtc(currentBtcValue))}</span>` : "";
+      const baselineSatsInline = mode.id === "sats" ? ` <span class="inline-sats baseline-value">= ${escapeHtml(fmtBtc(baselineBtcValue))}</span>` : "";
       return `
         <div class="basket-stat ${boxCls}">
           <div class="label">${escapeHtml(mode.label)}</div>
           <div class="metric">
-            <div class="label-text is-current hoverable" title="${basketIndexTitle}">Basket index</div>
-            <strong class="${trendCls}">${escapeHtml(fmtCommodityForMode(last, mode.id))}</strong>${satsInline}
+            <div class="label-text is-current hoverable" title="${basketIndexTitle}">Current basket index</div>
+            <strong class="${trendCls}">${escapeHtml(fmtCommodityForMode(last, mode.id))}</strong>${currentSatsInline}
           </div>
           <div class="metric">
             <div class="label-text hoverable" title="${baselineTitle}">Original baseline basket index</div>
-            <strong>${escapeHtml(fmtCommodityForMode(baseline, mode.id))}</strong>${satsInline}
+            <strong class="baseline-value">${escapeHtml(fmtCommodityForMode(baseline, mode.id))}</strong>${baselineSatsInline}
           </div>
-          <div class="metric">
+          <div class="metric ${boxCls}">
             <div>Inflation vs baseline</div>
-            <strong class="${inflCls}">${inflation.toFixed(2)}%</strong>
+            <strong>${inflation.toFixed(2)}%</strong>
           </div>
         </div>
       `;
@@ -1735,7 +1752,7 @@
       })
       .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
 
-    const MAX_ITEMS = 6;
+    const MAX_ITEMS = 10;
     const selected = ranked.slice(0, MAX_ITEMS);
     const others = ranked.slice(MAX_ITEMS);
 
@@ -1822,6 +1839,7 @@
     if (basketItemHistories) return basketItemHistories;
     const descriptions = cfg.items.map(item => {
       const latestRow = latest?.items?.find(x => x.id === item.id);
+      if (item.id === "cash10") return "$10 fixed";
       return latestRow?.item_description || item.name || "";
     }).filter(Boolean);
 
