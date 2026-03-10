@@ -1341,11 +1341,16 @@
     const labels = sortedTs.map(ts => new Date(ts).toLocaleString());
 
     const cfg = getCommodityConfig();
+    const isElectricityMode = cfg.id === "mwh";
+    const chartUnitLabel = isElectricityMode ? "1 kWh electricity" : cfg.unitLabel;
     const datasets = allHistories.map((item, idx) => {
       const color = palette[idx % palette.length];
       const map = new Map((item.history || []).map(point => [
         point.ts,
-        getCommodityValue(normalizeUsdForHistory(item.description, point.usd), Number(point.sats), point.ts)
+        (() => {
+          const value = getCommodityValue(normalizeUsdForHistory(item.description, point.usd), Number(point.sats), point.ts);
+          return isElectricityMode && isFinite(value) ? value * 1000 : value;
+        })()
       ]));
       return {
         label: item.description,
@@ -1372,7 +1377,7 @@
         plugins: { legend: { display: true } },
         scales: {
           x: { ticks: { maxTicksLimit: 6 } },
-          y: { title: { display: true, text: cfg.unitLabel } }
+          y: { title: { display: true, text: chartUnitLabel } }
         }
       }
     });
