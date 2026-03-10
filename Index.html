@@ -99,6 +99,14 @@
       outline: none;
       font-weight: 600;
     }
+    select:disabled{
+      opacity:.42;
+      filter: grayscale(.45);
+      border-color: rgba(148,163,184,.75);
+      background: rgba(15,23,42,.72);
+      color: rgba(255,255,255,.55);
+      cursor:not-allowed;
+    }
 
     .grid{
       display:grid;
@@ -184,6 +192,10 @@
     }
     .kpi .label{ font-size:12px; color:var(--muted); }
     .kpi .val{ font-size:18px; font-weight:900; margin-top:6px; }
+    .kpi.subdued{
+      opacity:.72;
+      border-style:dashed;
+    }
 
     /* FIX: bounded chart containers prevent runaway vertical growth */
     .chartBox{ height: 280px; position: relative; }
@@ -282,6 +294,12 @@
       box-shadow: inset 0 0 0 1px rgba(125,211,252,.2);
       background: linear-gradient(135deg, rgba(125,211,252,0.18), rgba(196,181,253,0.14));
     }
+    .inline-metric{ margin-right:14px; white-space:nowrap; }
+    .current-basket{ color: var(--accent); font-weight:900; }
+    .baseline-basket{ color: #d2b48c; font-weight:900; }
+    .money-up{ color: var(--bad); font-weight:900; }
+    .money-down{ color: var(--good); font-weight:900; }
+    .money-flat{ color: var(--text); font-weight:900; }
     .first-available{
       margin-top:6px;
       font-size:12px;
@@ -420,7 +438,7 @@
           </select>
           <span class="filter-label">Item</span>
           <select id="ppItemSelect"></select>
-          <span class="filter-label">Group</span>
+          <span class="filter-label" id="ppGroupLabel">Group</span>
           <select id="ppGroupSelect"><option value="all">All groups</option></select>
         </div>
       </div>
@@ -429,10 +447,10 @@
       <div class="note" id="ppInsight"></div>
       <div class="note" id="ppStaleNote"></div>
 
-      <div class="chart-title" style="margin-top:12px;">Basket cost in sats over time (lower is better)</div>
+      <div class="chart-title" style="margin-top:12px;" id="ppSatsTitle">Basket cost in sats over time (lower is better)</div>
       <div class="chartBox"><canvas id="ppSatsChart"></canvas></div>
 
-      <div class="chart-title" style="margin-top:12px;">Same basket, two rulers (normalized index, baseline = 100)</div>
+      <div class="chart-title" style="margin-top:12px;" id="ppComparisonTitle">Same basket, two rulers (normalized index, baseline = 100)</div>
       <div class="chartBox"><canvas id="ppComparisonChart"></canvas></div>
       <div class="note" id="ppComparisonNote"></div>
 
@@ -541,7 +559,7 @@
                 <th>Sats</th>
                 <th>Gold (g)</th>
                 <th>Silver (g)</th>
-                <th>MWh</th>
+                <th>kWh</th>
                 <th>Vendor</th>
                 <th>Provider</th>
                 <th>Source URL</th>
@@ -598,7 +616,7 @@
     { id: "dollars", label: "Dollars", unitLabel: "$", unitShort: "$", precision: 2 },
     { id: "gold", label: "Gold", unitLabel: "grams of gold", unitShort: "g gold", precision: 4 },
     { id: "silver", label: "Silver", unitLabel: "1 gram silver", unitShort: "g silver", precision: 4 },
-    { id: "mwh", label: "MWh", unitLabel: "1 MWh electricity", unitShort: "MWh", precision: 2 }
+    { id: "mwh", label: "kWh", unitLabel: "kWh electricity", unitShort: "kWh", precision: 2 }
   ];
 
   const $ = (id) => document.getElementById(id);
@@ -2028,9 +2046,15 @@
       });
     });
     const groupOptions = Array.from(groupSet).sort();
-    groupSel.innerHTML = '<option value="all">All groups</option>' + groupOptions.map(group => (
+    const hasRealGroups = groupOptions.length > 1;
+    const groupLabel = $("ppGroupLabel");
+    groupSel.innerHTML = '<option value="all">All groups</option>' + (hasRealGroups ? groupOptions.map(group => (
       `<option value="${escapeHtml(group)}">${escapeHtml(group)}</option>`
-    )).join('');
+    )).join('') : '');
+    groupSel.disabled = !hasRealGroups;
+    if (!hasRealGroups) groupSel.value = "all";
+    groupSel.title = hasRealGroups ? "Filter by group" : "No alternate groups found in current data.";
+    if (groupLabel) groupLabel.textContent = hasRealGroups ? "Group" : "Group (only one)";
   }
 
   function getPurchasingPowerView(){
@@ -2093,20 +2117,27 @@
     return ((last / first) - 1) * 100;
   }
 
+  function priceDeltaClass(current, original){
+    if (!isFinite(current) || !isFinite(original)) return "money-flat";
+    if (current > original) return "money-up";
+    if (current < original) return "money-down";
+    return "money-flat";
+  }
+
   function renderPurchasingPowerDashboard(){
     const view = getPurchasingPowerView();
     const itemSel = $("ppItemSelect");
     if (itemSel) itemSel.disabled = view.viewMode !== "item";
     const filtered = applyPurchasingPowerFilters(purchasingPowerData, view);
-    renderPurchasingHero(filtered);
-    renderPurchasingCharts(filtered);
+    renderPurchasingHero(filtered, view);
+    renderPurchasingCharts(filtered, view);
     renderPurchasingAttribution(filtered);
     renderPurchasingItems(filtered, view);
     renderPurchasingWinners(filtered, view);
     renderPurchasingQuality(filtered);
   }
 
-  function renderPurchasingHero(snapshots){
+  function renderPurchasingHero(snapshots, view){
     const wrap = $("ppHeroKpis");
     const keyLines = $("ppKeyLines");
     if (!wrap) return;
@@ -2119,20 +2150,24 @@
     const first = snapshots[0];
     const last = snapshots[snapshots.length - 1];
     const metrics = [
-      { label: "Snapshots in range", value: String(snapshots.length), ch: NaN }
+      { label: "Snapshots in range", value: String(snapshots.length), ch: NaN, subdued: true }
     ];
     wrap.innerHTML = metrics.map(metric => {
       const ch = metric.ch;
       const cls = !isFinite(ch) ? "" : (ch > 0 ? "bad" : (ch < 0 ? "good" : ""));
       const txt = isFinite(ch) ? `${ch > 0 ? '+' : ''}${ch.toFixed(2)}%` : "—";
-      return `<div class="kpi"><div class="label">${metric.label}</div><div class="val">${metric.value}</div><div class="label ${cls}">${txt}</div></div>`;
+      return `<div class="kpi ${metric.subdued ? "subdued" : ""}"><div class="label">${metric.label}</div><div class="val">${metric.value}</div><div class="label ${cls}">${txt}</div></div>`;
     }).join("");
 
     if (keyLines) {
+      const usdTrendClass = priceDeltaClass(last.basketUsd, first.basketUsd);
+      const satsTrendClass = priceDeltaClass(last.basketSats, first.basketSats);
       keyLines.innerHTML = `
-        <div class="pp-key-line highlight"><span class="label">Current BTC/USD:</span>${escapeHtml(fmtUsd(last.btcUsd))}</div>
-        <div class="pp-key-line"><span class="label">Current basket:</span>${escapeHtml(fmtUsd(last.basketUsd))} · ${escapeHtml(fmtSats(last.basketSats))}</div>
-        <div class="pp-key-line"><span class="label">Original basket:</span>${escapeHtml(fmtUsd(first.basketUsd))} · ${escapeHtml(fmtSats(first.basketSats))}</div>
+        <div class="pp-key-line highlight">
+          <span class="inline-metric"><span class="label">Current BTC/USD:</span>${escapeHtml(fmtUsd(last.btcUsd))}</span>
+          <span class="inline-metric"><span class="label">Current basket:</span><span class="current-basket ${usdTrendClass}">${escapeHtml(fmtUsd(last.basketUsd))}</span> · <span class="current-basket ${satsTrendClass}">${escapeHtml(fmtSats(last.basketSats))}</span></span>
+          <span class="inline-metric"><span class="label">Original basket:</span><span class="baseline-basket">${escapeHtml(fmtUsd(first.basketUsd))}</span> · <span class="baseline-basket">${escapeHtml(fmtSats(first.basketSats))}</span></span>
+        </div>
       `;
     }
 
@@ -2155,8 +2190,16 @@
     return "Bitcoin purchasing power improved over this range because the basket now costs fewer sats.";
   }
 
-  function renderPurchasingCharts(snapshots){
+  function renderPurchasingCharts(snapshots, view){
     const labels = snapshots.map(s => fmtDate(s.ts));
+    const selectedItem = (purchasingPowerData?.items || []).find(item => item.key === view?.itemKey);
+    const itemSuffix = (view?.viewMode === "item" && selectedItem)
+      ? ` (${selectedItem.description})`
+      : "";
+    const satsTitle = $("ppSatsTitle");
+    const comparisonTitle = $("ppComparisonTitle");
+    if (satsTitle) satsTitle.textContent = `Basket cost in sats over time${itemSuffix} (lower is better)`;
+    if (comparisonTitle) comparisonTitle.textContent = `Same basket, two rulers${itemSuffix} (normalized index, baseline = 100)`;
     const satsSeries = snapshots.map(s => isFinite(s.basketSats) ? s.basketSats : null);
     const usdSeries = snapshots.map(s => isFinite(s.basketUsd) ? s.basketUsd : null);
 
