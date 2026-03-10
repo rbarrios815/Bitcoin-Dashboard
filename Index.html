@@ -2171,6 +2171,7 @@
           <span class="inline-metric"><span class="label">Current BTC/USD:</span>${escapeHtml(fmtUsd(last.btcUsd))}</span>
           <span class="inline-metric"><span class="label">Current basket:</span><span class="current-basket ${usdTrendClass}">${escapeHtml(fmtUsd(last.basketUsd))}</span> · <span class="current-basket ${satsTrendClass}">${escapeHtml(fmtSats(last.basketSats))}</span></span>
           <span class="inline-metric"><span class="label">Original basket:</span><span class="baseline-basket">${escapeHtml(fmtUsd(first.basketUsd))}</span> · <span class="baseline-basket">${escapeHtml(fmtSats(first.basketSats))}</span></span>
+          <span class="inline-metric"><span class="label">Snapshots in range:</span>${snapshots.length}</span>
         </div>
       `;
     }
@@ -2232,7 +2233,7 @@
       },
       options: { responsive: true, maintainAspectRatio: false, animation: false }
     });
-    $("ppComparisonNote").textContent = "Both lines are rebased to 100 at the first visible date. This chart compares direction/speed of change, not absolute prices.";
+    $("ppComparisonNote").textContent = "Both lines are rebased to 100 at the first visible date. Direction means whether each line moved above or below 100 (up = basket got more expensive in that unit, down = cheaper). Speed means how fast the percent change happened over the same dates: steeper/farther moves from 100 indicate faster change. This compares relative movement, not absolute price levels.";
   }
 
   function renderPurchasingAttribution(snapshots){
@@ -2243,7 +2244,7 @@
     const usdFactor = isFinite(first.basketUsd) && first.basketUsd > 0 ? last.basketUsd / first.basketUsd : NaN;
     const btcFactor = isFinite(first.btcUsd) && first.btcUsd > 0 ? first.btcUsd / last.btcUsd : NaN;
     const net = isFinite(first.basketSats) && first.basketSats > 0 ? last.basketSats / first.basketSats : NaN;
-    el.textContent = `Sats move is driven by two forces: basket USD moved by factor x${isFinite(usdFactor)?usdFactor.toFixed(3):'—'}, and BTC/USD purchasing power contributed factor x${isFinite(btcFactor)?btcFactor.toFixed(3):'—'}. Combined net sats factor means the final multiplier from start to end (latest basket sats ÷ baseline basket sats): x${isFinite(net)?net.toFixed(3):'—'}.`;
+    el.textContent = `Basket sats changed because of two multipliers. (1) Basket USD factor = latest basket USD ÷ baseline basket USD = x${isFinite(usdFactor)?usdFactor.toFixed(3):'—'}. (2) BTC purchasing-power factor = baseline BTC/USD ÷ latest BTC/USD = x${isFinite(btcFactor)?btcFactor.toFixed(3):'—'} (when BTC/USD rises, this is usually < 1, which helps reduce sats needed). Approx combined effect is USD factor × BTC factor, and the observed net sats factor (latest basket sats ÷ baseline basket sats) is x${isFinite(net)?net.toFixed(3):'—'}. Values above 1 mean the basket needs more sats than baseline; below 1 mean fewer sats.`;
   }
 
   function renderPurchasingItems(snapshots, view){
