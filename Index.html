@@ -498,7 +498,7 @@
         Positive percentages are shown in red (inflation), while negative percentages are shown in green (deflation).
       </div>
       <div class="note" id="basketBaselineNote"></div>
-      <div class="note">How to read these charts: Basket Inflation shows the basket priced in each commodity view over time. Normalized Basket Index rebases the baseline snapshot to 100, so values above 100 mean higher cost vs baseline and below 100 mean lower cost. Basket indexes are computed as an average cost per tracked item so the trend stays comparable as the basket changes size. Basket Change by Item shows each item's USD delta from baseline, and those deltas are summed to explain the total move; positive values push inflation up, negative values pull it down.</div>
+      <div class="note">How to read these charts: Basket Inflation shows basket cost over time in the selected unit. Normalized Basket Index is calculated as (basket value ÷ first visible basket value) × 100, so 100 is the baseline, above 100 means cost increased, and below 100 means cost decreased. Basket indexes are computed as average cost per tracked item so comparisons stay fair if basket size changes. Basket Change by Item uses USD delta per item (latest USD − baseline USD); all item deltas add up to the total basket USD move, where positive values push inflation higher and negative values pull it lower.</div>
       <div class="basket-stats" id="basketStats"></div>
 
       <div style="height:12px"></div>
@@ -648,7 +648,7 @@
     if (cfg.id === "dollars") return fmtUsd(n);
     if (cfg.id === "grocery") return fmtUsd(n);
     if (cfg.id === "sats") return `${Math.round(n).toLocaleString()} sats`;
-    if (cfg.id === "mwh") return `${(n * 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh`;
+    if (cfg.id === "mwh") return `${n.toLocaleString(undefined, { maximumFractionDigits: 4 })} kWh`;
     return n.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
   }
   function fmtDate(d){
@@ -996,7 +996,7 @@
       }
       case "mwh": {
         const ref = getReferenceUsd("mwh", ts);
-        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) : NaN;
+        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) * 1000 : NaN;
       }
       case "grocery":
       default:
@@ -1296,6 +1296,7 @@
   function normalizeUsdForHistory(description, usd){
     const numericUsd = Number(usd);
     if (!isFinite(numericUsd)) return numericUsd;
+    if (isMwhDescription(description)) return numericUsd / 1000;
     return numericUsd;
   }
 
@@ -1361,8 +1362,7 @@
       const map = new Map((item.history || []).map(point => [
         point.ts,
         (() => {
-          const value = getCommodityValue(normalizeUsdForHistory(item.description, point.usd), Number(point.sats), point.ts);
-          return isElectricityMode && isFinite(value) ? value * 1000 : value;
+          return getCommodityValue(normalizeUsdForHistory(item.description, point.usd), Number(point.sats), point.ts);
         })()
       ]));
       return {
@@ -2053,8 +2053,12 @@
     )).join('') : '');
     groupSel.disabled = !hasRealGroups;
     if (!hasRealGroups) groupSel.value = "all";
-    groupSel.title = hasRealGroups ? "Filter by group" : "No alternate groups found in current data.";
-    if (groupLabel) groupLabel.textContent = hasRealGroups ? "Group" : "Group (only one)";
+    groupSel.title = hasRealGroups ? "Filter by group" : "Only one group is present in current data.";
+    if (groupLabel) {
+      groupLabel.textContent = "Group";
+      groupLabel.style.display = hasRealGroups ? "inline" : "none";
+    }
+    groupSel.style.display = hasRealGroups ? "inline-block" : "none";
   }
 
   function getPurchasingPowerView(){
@@ -2239,7 +2243,7 @@
     const usdFactor = isFinite(first.basketUsd) && first.basketUsd > 0 ? last.basketUsd / first.basketUsd : NaN;
     const btcFactor = isFinite(first.btcUsd) && first.btcUsd > 0 ? first.btcUsd / last.btcUsd : NaN;
     const net = isFinite(first.basketSats) && first.basketSats > 0 ? last.basketSats / first.basketSats : NaN;
-    el.textContent = `Sats move is driven by two forces: basket USD moved x${isFinite(usdFactor)?usdFactor.toFixed(3):'—'}, and BTC/USD purchasing power factor contributed x${isFinite(btcFactor)?btcFactor.toFixed(3):'—'}. Combined net sats factor: x${isFinite(net)?net.toFixed(3):'—'}.`;
+    el.textContent = `Sats move is driven by two forces: basket USD moved by factor x${isFinite(usdFactor)?usdFactor.toFixed(3):'—'}, and BTC/USD purchasing power contributed factor x${isFinite(btcFactor)?btcFactor.toFixed(3):'—'}. Combined net sats factor means the final multiplier from start to end (latest basket sats ÷ baseline basket sats): x${isFinite(net)?net.toFixed(3):'—'}.`;
   }
 
   function renderPurchasingItems(snapshots, view){
