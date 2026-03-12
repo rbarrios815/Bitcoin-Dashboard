@@ -272,7 +272,29 @@
     .basket-stat .metric .label-text.hoverable{
       text-decoration: underline dotted;
       text-underline-offset: 2px;
-      cursor: help;
+      cursor: pointer;
+    }
+    .floating-tooltip{
+      position: fixed;
+      z-index: 1200;
+      max-width: min(460px, calc(100vw - 24px));
+      background: rgba(8,12,25,.96);
+      border: 1px solid rgba(125,211,252,.45);
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-line;
+      box-shadow: 0 8px 30px rgba(0,0,0,.42);
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity .1s ease, transform .1s ease;
+    }
+    .floating-tooltip.active{
+      opacity: 1;
+      transform: translateY(0);
     }
     .basket-stat .metric strong.value-up{ color: var(--bad); }
     .basket-stat .metric strong.value-down{ color: var(--good); }
@@ -895,6 +917,10 @@
       .replaceAll(">","&gt;")
       .replaceAll('"',"&quot;")
       .replaceAll("'","&#039;");
+  }
+
+  function escapeHtmlWithBreaks(s){
+    return escapeHtml(s).replaceAll("\n", "&#10;");
   }
 
   function isValidVendor(source){
@@ -1822,19 +1848,19 @@
         : null;
       const currentBtcValue = isFinite(lastSats) ? lastSats / 100000000 : NaN;
       const baselineBtcValue = isFinite(baselineSats) ? baselineSats / 100000000 : NaN;
-      const basketIndexTitle = escapeHtml(currentItemsTitle);
-      const baselineTitle = escapeHtml(baselineItemsTitle);
+      const basketIndexTitle = escapeHtmlWithBreaks(currentItemsTitle);
+      const baselineTitle = escapeHtmlWithBreaks(baselineItemsTitle);
       const currentSatsInline = mode.id === "sats" ? ` <span class="inline-sats ${trendCls}">= ${escapeHtml(fmtBtc(currentBtcValue))}</span>` : "";
       const baselineSatsInline = mode.id === "sats" ? ` <span class="inline-sats baseline-value">= ${escapeHtml(fmtBtc(baselineBtcValue))}</span>` : "";
       return `
         <div class="basket-stat ${boxCls}">
           <div class="label">${escapeHtml(mode.label)}</div>
           <div class="metric">
-            <div class="label-text is-current hoverable" title="${basketIndexTitle}">Current basket index</div>
+            <div class="label-text is-current hoverable" tabindex="0" data-tooltip="${basketIndexTitle}" title="${basketIndexTitle}">Current basket index</div>
             <strong class="${trendCls}">${escapeHtml(fmtCommodityForMode(last, mode.id))}</strong>${currentSatsInline}
           </div>
           <div class="metric">
-            <div class="label-text hoverable" title="${baselineTitle}">Original baseline basket index</div>
+            <div class="label-text hoverable" tabindex="0" data-tooltip="${baselineTitle}" title="${baselineTitle}">Original baseline basket index</div>
             <strong class="baseline-value">${escapeHtml(fmtCommodityForMode(baseline, mode.id))}</strong>${baselineSatsInline}
           </div>
           <div class="metric ${boxCls}">
@@ -2340,6 +2366,91 @@
     });
   }
 
+  function positionFloatingTooltip(el, anchor){
+    if (!el || !anchor) return;
+    const margin = 12;
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth || document.documentElement.clientWidth;
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+
+    let left = Number(anchor.clientX) + 14;
+    let top = Number(anchor.clientY) + 14;
+    if (!isFinite(left) || !isFinite(top)) {
+      const sourceRect = anchor.target?.getBoundingClientRect?.();
+      left = (sourceRect?.left || margin) + 10;
+      top = (sourceRect?.bottom || margin) + 10;
+    }
+
+    if (left + rect.width > vw - margin) left = Math.max(margin, vw - rect.width - margin);
+    if (top + rect.height > vh - margin) top = Math.max(margin, vh - rect.height - margin);
+
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+  }
+
+  function hideBasketHoverTooltip(){
+    const tip = $("basketHoverTooltip");
+    if (!tip) return;
+    tip.classList.remove("active");
+    tip.setAttribute("aria-hidden", "true");
+  }
+
+  function showBasketHoverTooltip(target, anchor){
+    const tip = $("basketHoverTooltip");
+    if (!tip || !target) return;
+    const text = String(target.getAttribute("data-tooltip") || target.getAttribute("title") || "").trim();
+    if (!text) {
+      hideBasketHoverTooltip();
+      return;
+    }
+    tip.textContent = text;
+    tip.classList.add("active");
+    tip.setAttribute("aria-hidden", "false");
+    positionFloatingTooltip(tip, anchor || { target });
+  }
+
+  function setupBasketStatsTooltip(){
+    const wrap = $("basketStats");
+    if (!wrap) return;
+
+    wrap.addEventListener("mouseenter", (event) => {
+      const target = event.target.closest(".hoverable[data-tooltip]");
+      if (!target) return;
+      showBasketHoverTooltip(target, event);
+    }, true);
+
+    wrap.addEventListener("mousemove", (event) => {
+      const target = event.target.closest(".hoverable[data-tooltip]");
+      if (!target) return;
+      showBasketHoverTooltip(target, event);
+    });
+
+    wrap.addEventListener("mouseleave", (event) => {
+      const target = event.target.closest(".hoverable[data-tooltip]");
+      if (!target) return;
+      hideBasketHoverTooltip();
+    }, true);
+
+    wrap.addEventListener("focusin", (event) => {
+      const target = event.target.closest(".hoverable[data-tooltip]");
+      if (!target) return;
+      showBasketHoverTooltip(target, { target });
+    });
+
+    wrap.addEventListener("focusout", (event) => {
+      const target = event.target.closest(".hoverable[data-tooltip]");
+      if (!target) return;
+      hideBasketHoverTooltip();
+    });
+
+    wrap.addEventListener("click", (event) => {
+      const target = event.target.closest(".hoverable[data-tooltip]");
+      if (!target) return;
+      showBasketHoverTooltip(target, event);
+      setTimeout(hideBasketHoverTooltip, 5000);
+    });
+  }
+
   function renderPurchasingItems(snapshots, view){
     const body = $("ppItemsTable");
     if (!body) return;
@@ -2445,6 +2556,7 @@
   $("ppGroupSelect").addEventListener("change", renderPurchasingPowerDashboard);
   setupNoteToggle("ppAttributionToggle", "ppAttributionWrap");
   setupNoteToggle("basketExplanationToggle", "basketExplanationWrap");
+  setupBasketStatsTooltip();
 
   (async () => {
     try {
@@ -2455,5 +2567,6 @@
     }
   })();
 </script>
+<div id="basketHoverTooltip" class="floating-tooltip" role="tooltip" aria-hidden="true"></div>
 </body>
 </html>
