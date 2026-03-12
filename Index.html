@@ -395,6 +395,20 @@
     .view-controls{
       margin: 12px 0 16px;
     }
+    .switch-row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:12px;
+      color:var(--muted);
+      font-weight:700;
+    }
+    .switch-row input{
+      accent-color: var(--accent);
+      width:16px;
+      height:16px;
+      cursor:pointer;
+    }
   </style>
 </head>
 
@@ -524,7 +538,13 @@
 
     <div class="grid">
       <div class="card" style="grid-column: 1 / -1;">
-        <h3>Items (click one)</h3>
+        <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap;">
+          <h3 style="margin:0;">Items (click one)</h3>
+          <label class="switch-row" for="itemGroceryTermsToggle">
+            <input type="checkbox" id="itemGroceryTermsToggle" />
+            Show values in grocery-item terms
+          </label>
+        </div>
         <div class="items" id="items"></div>
         <div class="note" id="itemsNote"></div>
       </div>
@@ -581,6 +601,7 @@
   let activeItemId = null;
   let itemViewMode = "selected";
   let commodityMode = "grocery";
+  let showItemGroceryTerms = false;
   let referenceHistory = {
     basket: [],
     gold: [],
@@ -1081,8 +1102,6 @@
       const first = row?.first_available;
       const firstDate = fmtDate(first?.ts);
       const firstUsd = first?.usd;
-      const firstCommodity = first ? fmtCommodity(getCommodityValue(firstUsd, first.sats, first.ts)) : "—";
-      const firstCommodityValue = first ? getCommodityValue(firstUsd, first.sats, first.ts) : NaN;
       const firstSats = first?.sats != null ? fmtSats(first.sats) : "—";
       const firstGoldValue = first ? getCommodityValueForMode("gold", firstUsd, first.sats, first.ts) : NaN;
       const firstSilverValue = first ? getCommodityValueForMode("silver", firstUsd, first.sats, first.ts) : NaN;
@@ -1094,8 +1113,6 @@
       const satsClass = priceCompareClass(sats, first?.sats);
       const isUnverified = !stale && !hasSourceUrl(row) && !isCashTen;
       const latestTsLabel = latestTs ? fmtDateTime(latestTs) : "—";
-      const commodityValue = getCommodityValue(normalizedUsd, sats, latestTs);
-      const commodityClass = priceCompareClass(commodityValue, firstCommodityValue);
       const latestGoldValue = getCommodityValueForMode("gold", normalizedUsd, sats, latestTs);
       const latestSilverValue = getCommodityValueForMode("silver", normalizedUsd, sats, latestTs);
       const latestMwhValue = getCommodityValueForMode("mwh", normalizedUsd, sats, latestTs);
@@ -1105,6 +1122,9 @@
       const latestGold = fmtCommodityForMode(latestGoldValue, "gold");
       const latestSilver = fmtCommodityForMode(latestSilverValue, "silver");
       const latestMwh = fmtCommodityForMode(latestMwhValue, "mwh");
+      const latestUsdClass = priceCompareClass(normalizedUsd, firstUsd);
+      const groceryTermsLatest = showItemGroceryTerms ? buildGroceryTermsSummary(normalizedUsd, "latest") : "";
+      const groceryTermsEarliest = showItemGroceryTerms ? buildGroceryTermsSummary(firstUsd, "earliest") : "";
 
       const div = document.createElement("div");
       div.className = "item" + (it.id === activeItemId ? " active" : "");
@@ -1119,7 +1139,7 @@
         <div class="name">${escapeHtml(description)} ${badge}</div>
         <div class="meta">
           <span>
-            Latest: <span class="${commodityClass}">${fmtCommodity(commodityValue)}</span> •
+            Latest: <span class="${latestUsdClass}">${fmtUsd(normalizedUsd)}</span> •
             <span class="${satsClass}">${sats != null ? fmtSats(sats) : "—"}</span> •
             <span class="${latestGoldClass}">${latestGold}</span> •
             <span class="${latestSilverClass}">${latestSilver}</span> •
@@ -1128,7 +1148,9 @@
           </span>
         </div>
         <div class="first-available">
-          <span class="label-text">Earliest: ${firstCommodity} • ${firstSats} • ${firstGold} • ${firstSilver} • ${firstMwh} on ${firstDate}</span>
+          <span class="label-text">Earliest: ${fmtUsd(firstUsd)} • ${firstSats} • ${firstGold} • ${firstSilver} • ${firstMwh} on ${firstDate}</span>
+          ${groceryTermsLatest ? `<span class="label-text">Latest grocery-item terms: ${groceryTermsLatest}</span>` : ""}
+          ${groceryTermsEarliest ? `<span class="label-text">Earliest grocery-item terms: ${groceryTermsEarliest}</span>` : ""}
           <span>
             <span class="${vendorCount > 0 && sourceUrl ? "metric-blue" : "muted-text"}">Vendors seen: ${vendorCount}</span>
             ${sourceUrl
@@ -1142,12 +1164,31 @@
 
     const itemsNote = $("itemsNote");
     if (itemsNote) {
-      if (commodityMode === "grocery") {
-        itemsNote.textContent = "Grocery items view shows each item's USD price directly so items can be compared individually.";
-      } else {
-        itemsNote.textContent = "";
-      }
+      itemsNote.textContent = showItemGroceryTerms
+        ? "Grocery-item terms show what each price equals in units of every tracked grocery item."
+        : "";
     }
+  }
+
+  function isGroceryDenominationItem(itemId){
+    return !["gold", "silver", "mwh", "cash10"].includes(String(itemId || "").toLowerCase());
+  }
+
+  function buildGroceryTermsSummary(usdValue, phase){
+    if (!isFinite(usdValue) || !latest?.items?.length || !cfg?.items?.length) return "";
+    const label = phase === "earliest" ? "first_available" : "current";
+    const parts = cfg.items
+      .filter(it => isGroceryDenominationItem(it.id))
+      .map(it => {
+        const row = latest.items.find(x => x.id === it.id);
+        const denomUsd = phase === "earliest" ? Number(row?.first_available?.usd) : Number(row?.usd);
+        if (!isFinite(denomUsd) || denomUsd <= 0) return "";
+        const units = usdValue / denomUsd;
+        if (!isFinite(units)) return "";
+        return `${units.toFixed(2)} ${escapeHtml(it.name)}`;
+      })
+      .filter(Boolean);
+    return parts.length ? parts.join(" • ") : `No ${label} grocery-item pricing available.`;
   }
 
   async function selectItem(itemId){
@@ -2340,6 +2381,10 @@
   $("btnRecord")?.addEventListener("click", recordSnapshot);
   $("btnBasket")?.addEventListener("click", renderBasket);
   $("itemViewMode").addEventListener("change", renderItemHistoryWithProgress);
+  $("itemGroceryTermsToggle")?.addEventListener("change", (event) => {
+    showItemGroceryTerms = Boolean(event?.target?.checked);
+    renderItems();
+  });
   $("basketBaselineMode").addEventListener("change", renderBasket);
   $("ppRange").addEventListener("change", renderPurchasingPowerDashboard);
   $("ppViewMode").addEventListener("change", renderPurchasingPowerDashboard);
