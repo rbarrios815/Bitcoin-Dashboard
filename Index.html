@@ -1768,7 +1768,7 @@
     buildBasketContributionChart(hist, itemHistories, hist[0]?.ts, scopeLabel);
   }
 
-  function getBasketItemsForTimestamp(itemHistories, ts, baselineMode, baselineTs){
+  function getBasketItemsForTimestamp(itemHistories, ts, baselineMode, baselineTs, mode){
     if (!Array.isArray(itemHistories) || !ts) return { presentItems: [], missingItems: [] };
     let scoped = itemHistories;
     if (baselineMode === "fixed" && baselineTs) {
@@ -1779,9 +1779,17 @@
     const presentItems = [];
     const missingItems = [];
     scoped.forEach(entry => {
-      const value = entry.historyMap.get(ts)?.usd;
-      if (isFinite(value)) {
-        presentItems.push(`${entry.description} (${fmtUsd(Number(value))})`);
+      const value = entry.historyMap.get(ts);
+      const usd = Number(value?.usd);
+      const sats = Number(value?.sats);
+      const commodity = getCommodityValueForMode(mode, usd, sats, ts);
+      if (isFinite(usd) && isFinite(sats) && isFinite(commodity)) {
+        presentItems.push({
+          description: entry.description,
+          usd,
+          sats,
+          commodity
+        });
       } else {
         missingItems.push(entry.description);
       }
@@ -1789,19 +1797,25 @@
     return { presentItems, missingItems };
   }
 
-  function buildBasketItemsTooltip(label, ts, itemState){
+  function buildBasketItemsTooltip(label, ts, itemState, mode){
     const prettyDate = fmtDate(ts);
-    const header = `${label} (${prettyDate})`;
+    const unitCfg = getCommodityConfigById(mode);
+    const header = `${label} (${prettyDate}) — ${unitCfg.label}`;
     const present = itemState?.presentItems || [];
     const missing = itemState?.missingItems || [];
     if (!present.length && !missing.length) return `${header}\nNo item details available.`;
+
+    const sum = present.reduce((acc, item) => acc + item.commodity, 0);
+    const avg = present.length ? (sum / present.length) : NaN;
+
+    const formulaLine = `Basket index = average of present items in ${unitCfg.label}: ${fmtCommodityForMode(sum, mode)} ÷ ${present.length} = ${fmtCommodityForMode(avg, mode)}`;
     const presentLines = present.length
-      ? present.map((item, idx) => `${idx + 1}. ${item}`).join("\n")
+      ? present.map((item, idx) => `${idx + 1}. ${item.description}: ${fmtCommodityForMode(item.commodity, mode)}`).join("\n")
       : "No items with prices.";
     const missingLine = missing.length
       ? `\nMissing at this snapshot: ${missing.join(", ")}`
       : "";
-    return `${header}\n${presentLines}${missingLine}`;
+    return `${header}\n${formulaLine}\n${presentLines}${missingLine}`;
   }
 
   function renderBasketCommodityStats(hist, usdSeries, satsSeries, detailMeta){
@@ -1811,24 +1825,25 @@
     const currentIndex = getLastFiniteSeriesIndex(usdSeries);
     const baselineTs = detailMeta?.baselineTs || (baselineIndex >= 0 ? hist[baselineIndex]?.ts : null);
     const currentTs = detailMeta?.currentTs || (currentIndex >= 0 ? hist[currentIndex]?.ts : null);
-    const baselineItemState = getBasketItemsForTimestamp(
-      detailMeta?.itemHistories,
-      baselineTs,
-      detailMeta?.baselineMode,
-      baselineTs
-    );
-    const currentItemState = getBasketItemsForTimestamp(
-      detailMeta?.itemHistories,
-      currentTs,
-      detailMeta?.baselineMode,
-      baselineTs
-    );
-    const baselineItemsTitle = buildBasketItemsTooltip("Initial basket items", baselineTs, baselineItemState);
-    const currentItemsTitle = buildBasketItemsTooltip("Current basket items", currentTs, currentItemState);
-
     const rows = COMMODITIES
       .filter(mode => mode.id !== "grocery")
       .map(mode => {
+      const baselineItemState = getBasketItemsForTimestamp(
+        detailMeta?.itemHistories,
+        baselineTs,
+        detailMeta?.baselineMode,
+        baselineTs,
+        mode.id
+      );
+      const currentItemState = getBasketItemsForTimestamp(
+        detailMeta?.itemHistories,
+        currentTs,
+        detailMeta?.baselineMode,
+        baselineTs,
+        mode.id
+      );
+      const baselineItemsTitle = buildBasketItemsTooltip("Original baseline basket index", baselineTs, baselineItemState, mode.id);
+      const currentItemsTitle = buildBasketItemsTooltip("Current basket index", currentTs, currentItemState, mode.id);
       const series = hist.map((point, idx) => {
         const usd = usdSeries[idx];
         const sats = satsSeries[idx];
