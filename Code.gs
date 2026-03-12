@@ -1500,7 +1500,7 @@ function ensureCommodityItems_(items) {
   };
   addCommodity('gold', 'Gold');
   addCommodity('silver', 'Silver');
-  addCommodity('mwh', 'MWh');
+  addCommodity('mwh', 'kWh');
   addCommodity('cash10', '$10');
 }
 
@@ -1509,7 +1509,7 @@ function defaultQueryForItem_(itemName) {
   const overrides = {
     gold: '0.1 gram gold bar',
     silver: '1 gram silver bar',
-    mwh: '1 MWh electricity',
+    mwh: '1 kWh electricity',
     'ground beef': 'ground beef 80/20 1 lb',
     salt: 'iodized table salt 26 oz'
   };
@@ -1770,7 +1770,7 @@ function getStandardItemDescription_(itemName) {
     salt: 'Iodized table salt 26 oz',
     gold: 'Gold 0.1 gram bar',
     silver: 'Silver 1 gram bar',
-    mwh: 'Electricity 1 MWh'
+    mwh: 'Electricity 1 kWh'
   };
   if (descriptionOverrides[normalized]) return descriptionOverrides[normalized];
   return '';
@@ -1814,8 +1814,8 @@ function getItemDescription_(itemName, serpResult) {
       return 'Gold bullion bar weighing approximately 0.1 gram.';
     case 'silver 1 gram bar':
       return 'Silver bullion bar weighing approximately 1 gram.';
-    case 'electricity 1 mwh':
-      return 'Electricity energy quantity equivalent to 1 megawatt-hour.';
+    case 'electricity 1 kwh':
+      return 'Electricity energy quantity equivalent to 1 kilowatt-hour.';
     default: {
       const fallback = String(itemName || '').trim();
       return fallback || 'Grocery item.';

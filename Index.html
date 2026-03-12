@@ -743,6 +743,13 @@
     return dt.toLocaleString();
   }
 
+  function normalizeElectricityDescription(text){
+    return String(text || "")
+      .replace(/\b([0-9]+(?:\.[0-9]+)?)\s*MWh\b/gi, (_, value) => `${value} kWh`)
+      .replace(/\bmegawatt-hour(s)?\b/gi, 'kilowatt-hour$1')
+      .replace(/\bmwh\b/gi, 'kWh');
+  }
+
   function priceCompareClass(current, original){
     if (!isFinite(current) || !isFinite(original)) return "";
     if (current > original) return "bad";
@@ -1792,13 +1799,13 @@
       const commodity = getCommodityValueForMode(mode, usd, sats, ts);
       if (isFinite(usd) && isFinite(sats) && isFinite(commodity)) {
         presentItems.push({
-          description: entry.description,
+          description: normalizeElectricityDescription(entry.description),
           usd,
           sats,
           commodity
         });
       } else {
-        missingItems.push(entry.description);
+        missingItems.push(normalizeElectricityDescription(entry.description));
       }
     });
     return { presentItems, missingItems };
@@ -1963,7 +1970,7 @@
       .map(entry => {
         const baselineValue = entry.historyMap.get(baselineTs)?.usd;
         return {
-          description: entry.description,
+          description: normalizeElectricityDescription(entry.description),
           historyMap: entry.historyMap,
           baselineValue: Number(baselineValue)
         };
@@ -2098,7 +2105,7 @@
         { usd: Number(point.usd), sats: Number(point.sats) }
       ]));
       const firstTs = history.length ? history[0].ts : null;
-      return { description: entry.description, historyMap, firstTs };
+      return { description: normalizeElectricityDescription(entry.description), historyMap, firstTs };
     });
     return basketItemHistories;
   }
@@ -2302,7 +2309,7 @@ No priced items in this snapshot.`;
       weightedSatsTotal += sats * weight;
       weightedCount += weight;
       const weightLabel = weight !== 1 ? ` (weight ${weight.toFixed(3)})` : "";
-      return `${idx + 1}. ${item.description}: ${fmtUsd(usd)} · ${fmtSats(sats)}${weightLabel}`;
+      return `${idx + 1}. ${normalizeElectricityDescription(item.description)}: ${fmtUsd(usd)} · ${fmtSats(sats)}${weightLabel}`;
     });
 
     const avgUsd = weightedCount ? weightedUsdTotal / weightedCount : NaN;
