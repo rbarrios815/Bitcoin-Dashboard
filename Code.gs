@@ -26,6 +26,8 @@
  *   SERP_DEBUG - (optional) 'true' to log SerpAPI debug output
  ************************/
 
+const MWH_TO_KWH_ = 1000;
+
 /* =========================
    Web app entry
    ========================= */
@@ -73,6 +75,31 @@ function setupOnce() {
 /* =========================
    Core API: snapshot + history
    ========================= */
+
+function basketWeightForItemId_(itemId) {
+  return String(itemId || "").toLowerCase() === "mwh" ? (1 / MWH_TO_KWH_) : 1;
+}
+
+function computeWeightedBasketIndex_(items) {
+  let weightedUsdTotal = 0;
+  let weightedSatsTotal = 0;
+  let weightTotal = 0;
+
+  (items || []).forEach(item => {
+    const usd = Number(item && item.usd);
+    const sats = Number(item && item.sats);
+    const weight = basketWeightForItemId_(item && item.id);
+    if (!isFinite(usd) || !isFinite(sats) || !isFinite(weight) || weight <= 0) return;
+    weightedUsdTotal += usd * weight;
+    weightedSatsTotal += sats * weight;
+    weightTotal += weight;
+  });
+
+  return {
+    usd: weightTotal ? (weightedUsdTotal / weightTotal) : NaN,
+    sats: weightTotal ? (weightedSatsTotal / weightTotal) : NaN
+  };
+}
 
 /**
  * Fetch latest prices for ITEM_LIST (cached to save quota),
@@ -221,8 +248,9 @@ function fetchLatestSnapshot() {
     return Object.assign({}, item, { first_available: firstAvailable, vendor_count: vendorCount });
   });
 
-  const basketUsd = average_(priced.map(p => p.usd));
-  const basketSats = average_(priced.map(p => p.sats));
+  const weightedBasket = computeWeightedBasketIndex_(priced);
+  const basketUsd = weightedBasket.usd;
+  const basketSats = weightedBasket.sats;
 
   const out = {
     ts: snapshotTs,
@@ -591,20 +619,30 @@ function getBasketHistory() {
 
   const header = values[0];
   const idx = headerIndex_(header);
-  const seen = {};
-  const out = [];
+  const snapshots = {};
 
   for (let r = 1; r < values.length; r++) {
     const row = values[r];
-    const tsIso = new Date(row[idx.timestamp]).toISOString();
-    if (seen[tsIso]) continue;
-    seen[tsIso] = true;
-    out.push({
-      ts: tsIso,
-      basketIndexUsd: Number(row[idx.basket_index_usd]),
-      basketIndexSats: Number(row[idx.basket_index_sats])
+    const ts = row[idx.timestamp];
+    if (!ts) continue;
+    const tsIso = new Date(ts).toISOString();
+    if (!snapshots[tsIso]) snapshots[tsIso] = [];
+    snapshots[tsIso].push({
+      id: idx.item_id != null ? String(row[idx.item_id] || '') : '',
+      usd: Number(row[idx.usd]),
+      sats: Number(row[idx.sats])
     });
   }
+
+  const out = Object.keys(snapshots).map(ts => {
+    const weighted = computeWeightedBasketIndex_(snapshots[ts]);
+    return {
+      ts,
+      basketIndexUsd: isFinite(weighted.usd) ? weighted.usd : 0,
+      basketIndexSats: isFinite(weighted.sats) ? weighted.sats : 0
+    };
+  });
+
   out.sort((a, b) => new Date(a.ts) - new Date(b.ts));
   return out;
 }

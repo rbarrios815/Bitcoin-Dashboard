@@ -688,6 +688,7 @@
   const FETCH_MAX_MS = 60000;
 
   const GOLD_UNIT_GRAMS = 0.1;
+  const MWH_TO_KWH = 1000;
   const COMMODITIES = [
     { id: "grocery", label: "Grocery Items", unitLabel: "USD per item", unitShort: "$/item", precision: 2 },
     { id: "sats", label: "Satoshis", unitLabel: "sats", unitShort: "sats", precision: 2 },
@@ -961,6 +962,12 @@
     return COMMODITIES.find(x => x.id === mode) || COMMODITIES[0];
   }
 
+  function getBasketWeightByItemId(itemId){
+    const normalized = String(itemId || "").trim().toLowerCase();
+    if (normalized === "mwh") return 1 / MWH_TO_KWH;
+    return 1;
+  }
+
   function updateCommodityTitle(){
     const cfg = getCommodityConfig();
     const title = `Commodity Price Tracker — ${cfg.label}`;
@@ -1078,7 +1085,7 @@
       }
       case "mwh": {
         const ref = getReferenceUsd("mwh", ts);
-        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) * 1000 : NaN;
+        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) * MWH_TO_KWH : NaN;
       }
       case "grocery":
       default:
@@ -1871,11 +1878,11 @@
         <div class="basket-stat ${boxCls}">
           <div class="label">${escapeHtml(mode.label)}</div>
           <div class="metric">
-            <div class="label-text is-current hoverable" tabindex="0" data-tooltip="${basketIndexTitle}" title="${basketIndexTitle}">Current basket index</div>
+            <div class="label-text is-current hoverable" tabindex="0" data-tooltip="${basketIndexTitle}">Current basket index</div>
             <strong class="${trendCls}">${escapeHtml(fmtCommodityForMode(last, mode.id))}</strong>${currentSatsInline}
           </div>
           <div class="metric">
-            <div class="label-text hoverable" tabindex="0" data-tooltip="${baselineTitle}" title="${baselineTitle}">Original baseline basket index</div>
+            <div class="label-text hoverable" tabindex="0" data-tooltip="${baselineTitle}">Original baseline basket index</div>
             <strong class="baseline-value">${escapeHtml(fmtCommodityForMode(baseline, mode.id))}</strong>${baselineSatsInline}
           </div>
           <div class="metric ${boxCls}">
@@ -2215,13 +2222,23 @@
     });
 
     return ranged.map(snap => {
-      const usd = snap.items.map(item => Number(item.usd)).filter(v => isFinite(v));
-      const sats = snap.items.map(item => Number(item.sats)).filter(v => isFinite(v));
+      let weightedUsdTotal = 0;
+      let weightedSatsTotal = 0;
+      let weightedCount = 0;
+      snap.items.forEach(item => {
+        const usd = Number(item.usd);
+        const sats = Number(item.sats);
+        const weight = getBasketWeightByItemId(item.id);
+        if (!isFinite(usd) || !isFinite(sats) || !isFinite(weight) || weight <= 0) return;
+        weightedUsdTotal += usd * weight;
+        weightedSatsTotal += sats * weight;
+        weightedCount += weight;
+      });
       const btc = Number(snap.btcUsd);
       return {
         ...snap,
-        basketUsd: usd.length ? usd.reduce((a,b)=>a+b,0) / usd.length : NaN,
-        basketSats: sats.length ? sats.reduce((a,b)=>a+b,0) / sats.length : NaN,
+        basketUsd: weightedCount ? weightedUsdTotal / weightedCount : NaN,
+        basketSats: weightedCount ? weightedSatsTotal / weightedCount : NaN,
         btcUsd: isFinite(btc) ? btc : NaN,
         staleCount: snap.items.filter(item => item.is_stale).length,
         missingCount: snap.items.filter(item => !isFinite(Number(item.usd)) || !isFinite(Number(item.sats))).length,
@@ -2267,6 +2284,35 @@
     renderPurchasingQuality(filtered);
   }
 
+  function buildPurchasingBasketTooltip(label, snapshot){
+    if (!snapshot) return `${label}
+No snapshot data.`;
+    const rows = (snapshot.items || []).filter(item => isFinite(Number(item.usd)) && isFinite(Number(item.sats)));
+    if (!rows.length) return `${label} (${fmtDate(snapshot.ts)})
+No priced items in this snapshot.`;
+
+    let weightedUsdTotal = 0;
+    let weightedSatsTotal = 0;
+    let weightedCount = 0;
+    const lines = rows.map((item, idx) => {
+      const usd = Number(item.usd);
+      const sats = Number(item.sats);
+      const weight = getBasketWeightByItemId(item.id);
+      weightedUsdTotal += usd * weight;
+      weightedSatsTotal += sats * weight;
+      weightedCount += weight;
+      const weightLabel = weight !== 1 ? ` (weight ${weight.toFixed(3)})` : "";
+      return `${idx + 1}. ${item.description}: ${fmtUsd(usd)} · ${fmtSats(sats)}${weightLabel}`;
+    });
+
+    const avgUsd = weightedCount ? weightedUsdTotal / weightedCount : NaN;
+    const avgSats = weightedCount ? weightedSatsTotal / weightedCount : NaN;
+    const formula = `Basket index = weighted average: USD ${fmtUsd(weightedUsdTotal)} ÷ ${weightedCount.toFixed(3)} = ${fmtUsd(avgUsd)}; sats ${fmtSats(weightedSatsTotal)} ÷ ${weightedCount.toFixed(3)} = ${fmtSats(avgSats)}.`;
+    return `${label} (${fmtDate(snapshot.ts)})
+${formula}
+${lines.join("\n")}`;
+  }
+
   function renderPurchasingHero(snapshots, view){
     const wrap = $("ppHeroKpis");
     const keyLines = $("ppKeyLines");
@@ -2284,11 +2330,13 @@
     if (keyLines) {
       const usdTrendClass = priceDeltaClass(last.basketUsd, first.basketUsd);
       const satsTrendClass = priceDeltaClass(last.basketSats, first.basketSats);
+      const currentBasketTooltip = escapeHtmlWithBreaks(buildPurchasingBasketTooltip("Current basket", last));
+      const originalBasketTooltip = escapeHtmlWithBreaks(buildPurchasingBasketTooltip("Original basket", first));
       keyLines.innerHTML = `
         <div class="pp-key-line highlight">
           <span class="inline-metric"><span class="label">Current BTC/USD:</span>${escapeHtml(fmtUsd(last.btcUsd))}</span>
-          <span class="inline-metric"><span class="label">Current basket:</span><span class="current-basket ${usdTrendClass}">${escapeHtml(fmtUsd(last.basketUsd))}</span> · <span class="current-basket ${satsTrendClass}">${escapeHtml(fmtSats(last.basketSats))}</span></span>
-          <span class="inline-metric"><span class="label">Original basket:</span><span class="baseline-basket">${escapeHtml(fmtUsd(first.basketUsd))}</span> · <span class="baseline-basket">${escapeHtml(fmtSats(first.basketSats))}</span></span>
+          <span class="inline-metric"><span class="label hoverable" tabindex="0" data-tooltip="${currentBasketTooltip}">Current basket:</span><span class="current-basket ${usdTrendClass}">${escapeHtml(fmtUsd(last.basketUsd))}</span> · <span class="current-basket ${satsTrendClass}">${escapeHtml(fmtSats(last.basketSats))}</span></span>
+          <span class="inline-metric"><span class="label hoverable" tabindex="0" data-tooltip="${originalBasketTooltip}">Original basket:</span><span class="baseline-basket">${escapeHtml(fmtUsd(first.basketUsd))}</span> · <span class="baseline-basket">${escapeHtml(fmtSats(first.basketSats))}</span></span>
           <span class="inline-metric"><span class="label">Snapshots in range:</span>${snapshots.length}</span>
         </div>
       `;
@@ -2424,8 +2472,8 @@
     positionFloatingTooltip(tip, anchor || { target });
   }
 
-  function setupBasketStatsTooltip(){
-    const wrap = $("basketStats");
+  function setupHoverTooltipForContainer(containerId){
+    const wrap = $(containerId);
     if (!wrap) return;
 
     wrap.addEventListener("mouseenter", (event) => {
@@ -2571,7 +2619,8 @@
   $("ppGroupSelect").addEventListener("change", renderPurchasingPowerDashboard);
   setupNoteToggle("ppAttributionToggle", "ppAttributionWrap");
   setupNoteToggle("basketExplanationToggle", "basketExplanationWrap");
-  setupBasketStatsTooltip();
+  setupHoverTooltipForContainer("basketStats");
+  setupHoverTooltipForContainer("ppKeyLines");
 
   (async () => {
     try {
