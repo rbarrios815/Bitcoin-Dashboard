@@ -1,29 +1,9 @@
 /***********************
- * Grocery Price Tracker with SerpAPI fallback (Google Apps Script)
- *
- * REQUIRED Script Properties:
- *   RAPIDAPI_KEY
- *   PRICE_API_HOST = product-item-search-price-comparison.p.rapidapi.com
- *   PRICE_API_SEARCH_URL = https://product-item-search-price-comparison.p.rapidapi.com/product_search
- *   DATA_SHEET_NAME = GroceryPriceHistory
- *   ITEM_LIST = apples,bananas,milk,bread,eggs,rice,chicken,ground beef,butter,potatoes
- *
- * OPTIONAL Script Properties:
- *   COUNTRY_CODE = United States
- *   EXCLUDE_DOMAINS = amazon.com
- *   ITEM_CACHE_HOURS = 6
- *   BTC_CACHE_MINUTES = 30
- *   MAX_RESULTS_PER_ITEM = 5
- *   DEBUG = true
- *   ALLOW_STALE_FALLBACK = true
- *   API_RETRY_COUNT = 1
- *
- * SERPAPI Script Properties (for fallback):
- *   SERPAPI_KEY - your SerpAPI key
- *   SERPAPI_ENGINE - (optional) defaults to 'google_shopping'
- *   SERPAPI_LOCATION - (optional) location string (e.g. 'Austin, TX, USA')
- *   SERPAPI_NO_CACHE - (optional) 'true' to bypass SerpAPI cache
- *   SERP_DEBUG - (optional) 'true' to log SerpAPI debug output
+ * File: Code.gs
+ * Project: Bitcoin Dashboard (Google Apps Script)
+ * Purpose: Server-side data collection, normalization, caching, and web app API endpoints.
+ * Notes: Keep secrets in Script Properties only; never hardcode API keys.
+ * Maintenance: Validate property changes with setupOnce() and test web output after edits.
  ************************/
 
 const FIXED_BASKET_ITEMS_ = {
