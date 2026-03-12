@@ -738,7 +738,6 @@ function getPurchasingPowerDashboardData() {
   const idx = buildDashboardHeaderIndex_(header);
 
   const configuredItems = parseItems_(props.itemList)
-    .filter(item => !isReferenceItemId_(item.id))
     .map(item => ({ id: item.id, name: item.name }));
   const configuredNameById = {};
   configuredItems.forEach(item => configuredNameById[item.id] = item.name);
@@ -764,8 +763,6 @@ function getPurchasingPowerDashboardData() {
     }
 
     const itemId = idx.item_id != null ? String(row[idx.item_id] || '').trim() : '';
-    if (isReferenceItemId_(itemId)) continue;
-
     const itemName = idx.item_name != null ? String(row[idx.item_name] || '').trim() : '';
     const description = idx.item_description != null ? String(row[idx.item_description] || '').trim() : '';
     const source = idx.price_source != null ? String(row[idx.price_source] || '').trim() : '';
