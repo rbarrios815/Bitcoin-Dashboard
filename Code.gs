@@ -850,6 +850,61 @@ function getPurchasingPowerDashboardData() {
   }
 
   const snapshotKeys = Object.keys(snapshotsByTs).sort((a, b) => new Date(a) - new Date(b));
+  snapshotKeys.forEach(tsIso => {
+    const snapshot = snapshotsByTs[tsIso];
+    if (!snapshot) return;
+    const hasSats10000 = snapshot.itemRows.some(row => String(row.itemId || '').trim().toLowerCase() === 'sats10000');
+    if (hasSats10000) return;
+
+    const btcUsd = isFinite(snapshot.btcUsd)
+      ? snapshot.btcUsd
+      : average_(snapshot.itemRows.map(row => row.btcUsd));
+    if (!isFinite(btcUsd) || btcUsd <= 0) return;
+
+    const fixed = getFixedBasketValue_('sats10000', btcUsd);
+    if (!fixed || !isFinite(fixed.usd) || !isFinite(fixed.sats)) return;
+
+    const key = normalizeDescription_('10,000 satoshis');
+    const row = {
+      itemKey: key,
+      itemId: 'sats10000',
+      itemName: '10,000 Satoshis',
+      description: '10,000 satoshis',
+      usd: fixed.usd,
+      sats: fixed.sats,
+      btcUsd: btcUsd,
+      vendor: '',
+      source: 'fixed',
+      group: '',
+      is_stale: false
+    };
+
+    snapshot.itemRows.push(row);
+
+    if (!itemHistoryByKey[key]) {
+      itemHistoryByKey[key] = {
+        key: key,
+        itemId: 'sats10000',
+        itemName: '10,000 Satoshis',
+        description: '10,000 satoshis',
+        history: []
+      };
+    }
+
+    itemHistoryByKey[key].history.push({
+      ts: tsIso,
+      usd: fixed.usd,
+      sats: fixed.sats,
+      btcUsd: btcUsd,
+      vendor: '',
+      source: 'fixed',
+      group: '',
+      is_stale: false
+    });
+
+    if (!vendorSetByItem[key]) vendorSetByItem[key] = {};
+  });
+
   const snapshots = snapshotKeys.map(tsIso => {
     const entry = snapshotsByTs[tsIso];
     const rows = entry.itemRows;
