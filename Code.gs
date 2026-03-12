@@ -4,6 +4,8 @@
  * Purpose: Server-side data collection, normalization, caching, and web app API endpoints.
  * Notes: Keep secrets in Script Properties only; never hardcode API keys.
  * Maintenance: Validate property changes with setupOnce() and test web output after edits.
+ * Version: 1.0.1
+ * Body-Hash-SHA256: 92f4dde3685ea2100efd63dee8e1e2f6af86ddc700510743955d22f97d8f5722
  ************************/
 
 const FIXED_BASKET_ITEMS_ = {

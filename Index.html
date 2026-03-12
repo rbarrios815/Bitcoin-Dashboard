@@ -3,6 +3,8 @@
   Project: Bitcoin Dashboard (Google Apps Script Web App)
   Purpose: Front-end dashboard for commodity and BTC-linked pricing insights.
   Notes: Keep UI changes accessible/responsive and verify charts render after edits.
+  Version: 1.0.1
+  Body-Hash-SHA256: 65616e822e4e0b0e7561874020bf139e70ed0bc28bc9262e999e673c949c47f0
 -->
 <!doctype html>
 <html>
@@ -1137,11 +1139,17 @@
     return match?.item_description || "";
   }
 
+  function getCommodityDescriptionById(id){
+    const normalized = normalizeKey(id);
+    const match = latest?.items?.find(item => normalizeKey(item.id) === normalized);
+    return match?.item_description || "";
+  }
+
   async function loadCommodityHistories(){
     const descriptions = [];
     const goldDescription = getCommodityDescriptionByName("gold");
     const silverDescription = getCommodityDescriptionByName("silver");
-    const mwhDescription = getCommodityDescriptionByName("mwh");
+    const mwhDescription = getCommodityDescriptionById("mwh") || getCommodityDescriptionByName("mwh");
     if (goldDescription) descriptions.push(goldDescription);
     if (silverDescription) descriptions.push(silverDescription);
     if (mwhDescription) descriptions.push(mwhDescription);
