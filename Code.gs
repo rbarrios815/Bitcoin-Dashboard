@@ -428,7 +428,7 @@ function getLatestSnapshotFromSheet() {
       item_id: rowItemId,
       item_name: rowItemName,
       item_description: desc,
-      usd: Number(row[idx.usd]),
+      usd: convertElectricityUsdToKwh_(row[idx.usd], rowItemId, rowItemName, desc),
       sats: Number(row[idx.sats]),
       price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
       price_vendor: idx.price_vendor != null ? String(row[idx.price_vendor] || '') : '',
@@ -448,21 +448,21 @@ function getLatestSnapshotFromSheet() {
     if (!earliestByDescription[normalized] || ts < earliestByDescription[normalized].ts) {
       earliestByDescription[normalized] = {
         ts,
-        usd: Number(row[idx.usd]),
+        usd: convertElectricityUsdToKwh_(row[idx.usd], rowItemId, rowItemName, desc),
         sats: Number(row[idx.sats])
       };
     }
     if (rowItemId && (!earliestById[rowItemId] || ts < earliestById[rowItemId].ts)) {
       earliestById[rowItemId] = {
         ts,
-        usd: Number(row[idx.usd]),
+        usd: convertElectricityUsdToKwh_(row[idx.usd], rowItemId, rowItemName, desc),
         sats: Number(row[idx.sats])
       };
     }
     if (rowItemName && (!earliestByName[rowItemName] || ts < earliestByName[rowItemName].ts)) {
       earliestByName[rowItemName] = {
         ts,
-        usd: Number(row[idx.usd]),
+        usd: convertElectricityUsdToKwh_(row[idx.usd], rowItemId, rowItemName, desc),
         sats: Number(row[idx.sats])
       };
     }
@@ -543,6 +543,40 @@ function getLatestSnapshotFromSheet() {
   };
 }
 
+
+function buildFixedItemHistoryFromSheet_(sheet, fixedId, idx) {
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return [];
+  const out = [];
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const ts = parseSheetDate_(idx.timestamp != null ? row[idx.timestamp] : null);
+    if (!ts) continue;
+    const btcUsd = safeNumber_(idx.btc_usd != null ? row[idx.btc_usd] : null);
+    const fixed = getFixedBasketValue_(fixedId, btcUsd);
+    if (!fixed) continue;
+    out.push({
+      ts: ts.toISOString(),
+      usd: fixed.usd,
+      sats: fixed.sats,
+      btcUsd: btcUsd,
+      price_source: 'fixed',
+      price_vendor: '',
+      source_url: '',
+      is_stale: false
+    });
+  }
+  out.sort((a,b) => new Date(a.ts) - new Date(b.ts));
+  const dedup = [];
+  let lastTs = '';
+  out.forEach(row => {
+    if (row.ts === lastTs) return;
+    lastTs = row.ts;
+    dedup.push(row);
+  });
+  return dedup;
+}
+
 function getItemHistory(itemDescription) {
   const props = getProps_();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -557,6 +591,13 @@ function getItemHistory(itemDescription) {
   const out = [];
 
   const targetDescription = String(itemDescription || '').trim();
+  const normalizedTarget = normalizeDescription_(targetDescription);
+  if (normalizedTarget === normalizeDescription_('10,000 satoshis')) {
+    return buildFixedItemHistoryFromSheet_(sheet, 'sats10000', idx);
+  }
+  if (normalizedTarget === normalizeDescription_('$10')) {
+    return buildFixedItemHistoryFromSheet_(sheet, 'cash10', idx);
+  }
   const targetNormalized = normalizeDescription_(targetDescription);
   for (let r = 1; r < values.length; r++) {
     const row = values[r];
@@ -565,7 +606,7 @@ function getItemHistory(itemDescription) {
     if (normalizeDescription_(rowDescription) !== targetNormalized) continue;
     out.push({
       ts: new Date(row[idx.timestamp]).toISOString(),
-      usd: Number(row[idx.usd]),
+      usd: convertElectricityUsdToKwh_(row[idx.usd], idx.item_id != null ? row[idx.item_id] : '', idx.item_name != null ? row[idx.item_name] : '', rowDescription),
       sats: Number(row[idx.sats]),
       btcUsd: Number(row[idx.btc_usd]),
       price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
@@ -616,7 +657,7 @@ function getAllItemHistories(itemDescriptions) {
     }
     outByNormalized[normalized].history.push({
       ts: new Date(row[idx.timestamp]).toISOString(),
-      usd: Number(row[idx.usd]),
+      usd: convertElectricityUsdToKwh_(row[idx.usd], idx.item_id != null ? row[idx.item_id] : '', idx.item_name != null ? row[idx.item_name] : '', rowDescription),
       sats: Number(row[idx.sats]),
       btcUsd: Number(row[idx.btc_usd]),
       price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
@@ -625,6 +666,19 @@ function getAllItemHistories(itemDescriptions) {
       is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false
     });
   }
+
+  const fixedTargets = [
+    { normalized: normalizeDescription_('10,000 satoshis'), id: 'sats10000', label: '10,000 satoshis' },
+    { normalized: normalizeDescription_('$10'), id: 'cash10', label: '$10' }
+  ];
+  fixedTargets.forEach(fixed => {
+    if (!targetSet[fixed.normalized]) return;
+    if (!outByNormalized[fixed.normalized]) outByNormalized[fixed.normalized] = { description: fixed.label, history: [] };
+    if (!(outByNormalized[fixed.normalized].history || []).length) {
+      outByNormalized[fixed.normalized].history = buildFixedItemHistoryFromSheet_(sheet, fixed.id, idx);
+      if (!outByNormalized[fixed.normalized].description) outByNormalized[fixed.normalized].description = fixed.label;
+    }
+  });
 
   const out = Object.keys(outByNormalized).map(key => {
     const entry = outByNormalized[key];
@@ -657,7 +711,7 @@ function getBasketHistory() {
     if (!snapshots[tsIso]) snapshots[tsIso] = [];
     snapshots[tsIso].push({
       id: idx.item_id != null ? String(row[idx.item_id] || '') : '',
-      usd: Number(row[idx.usd]),
+      usd: convertElectricityUsdToKwh_(row[idx.usd], idx.item_id != null ? row[idx.item_id] : '', idx.item_name != null ? row[idx.item_name] : '', idx.item_description != null ? row[idx.item_description] : ''),
       sats: Number(row[idx.sats]),
       btcUsd: Number(row[idx.btc_usd])
     });
@@ -916,7 +970,10 @@ function findHeaderIndex_(headerRow, candidates) {
 }
 
 function deriveUsdValue_(row, idx) {
-  const direct = safeNumber_(idx.usd != null ? row[idx.usd] : null);
+  const itemId = idx.item_id != null ? row[idx.item_id] : '';
+  const itemName = idx.item_name != null ? row[idx.item_name] : '';
+  const itemDescription = idx.item_description != null ? row[idx.item_description] : '';
+  const direct = convertElectricityUsdToKwh_(idx.usd != null ? row[idx.usd] : null, itemId, itemName, itemDescription);
   if (isFinite(direct)) return direct;
   const sats = safeNumber_(idx.sats != null ? row[idx.sats] : null);
   const btcUsd = safeNumber_(idx.btc_usd != null ? row[idx.btc_usd] : null);
@@ -944,6 +1001,21 @@ function parseSheetDate_(value) {
 function safeNumber_(value) {
   const n = Number(value);
   return isFinite(n) ? n : NaN;
+}
+
+function isElectricityItemMeta_(itemId, itemName, itemDescription) {
+  const id = String(itemId || '').trim().toLowerCase();
+  if (id === 'mwh') return true;
+  const name = String(itemName || '').trim().toLowerCase();
+  const description = String(itemDescription || '').trim().toLowerCase();
+  const combined = `${name} ${description}`;
+  return combined.indexOf('electric') !== -1 || combined.indexOf('kwh') !== -1 || combined.indexOf('mwh') !== -1;
+}
+
+function convertElectricityUsdToKwh_(usd, itemId, itemName, itemDescription) {
+  const numeric = safeNumber_(usd);
+  if (!isFinite(numeric)) return NaN;
+  return isElectricityItemMeta_(itemId, itemName, itemDescription) ? (numeric / 1000) : numeric;
 }
 
 function uniqueValues_(values) {

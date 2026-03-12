@@ -458,6 +458,8 @@
     .collapsible-note[hidden]{
       display:none !important;
     }
+
+
   </style>
 </head>
 
@@ -488,7 +490,9 @@
             <option value="90d">90D</option>
             <option value="ytd">YTD</option>
             <option value="all">All</option>
+            <option value="custom">Custom date</option>
           </select>
+          <input type="date" id="ppCustomDate" style="display:none;" />
           <span class="filter-label">View</span>
           <select id="ppViewMode">
             <option value="basket" selected>Basket view</option>
@@ -557,7 +561,7 @@
           <span class="filter-label">Baseline scope</span>
           <select id="basketBaselineMode">
             <option value="rolling">Rolling (all items in each snapshot)</option>
-            <option value="fixed">Fixed baseline item set</option>
+            <option value="fixed" selected>Fixed baseline item set</option>
           </select>
           <button class="toggle-note-btn" id="basketExplanationToggle" type="button" aria-expanded="false" aria-controls="basketExplanationWrap">Show explanation</button>
         </div>
@@ -677,7 +681,7 @@
   let viewProgressTimer = null;
   let viewProgressHideTimer = null;
   let viewProgressStart = null;
-  let basketBaselineMode = "rolling";
+  let basketBaselineMode = "fixed";
   let basketItemHistories = null;
   let purchasingPowerData = null;
   let ppSatsChart = null;
@@ -1438,7 +1442,6 @@
   function normalizeUsdForHistory(description, usd){
     const numericUsd = Number(usd);
     if (!isFinite(numericUsd)) return numericUsd;
-    if (isMwhDescription(description)) return numericUsd / 1000;
     return numericUsd;
   }
 
@@ -2224,6 +2227,7 @@ ${itemLines}`;
       google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getPurchasingPowerDashboardData();
     });
     buildPurchasingPowerFilters();
+    updateRangeOptionAvailability();
     renderPurchasingPowerDashboard();
   }
 
@@ -2265,7 +2269,8 @@ ${itemLines}`;
       viewMode: $("ppViewMode")?.value || "basket",
       staleMode: $("ppStaleMode")?.value || "include",
       itemKey: $("ppItemSelect")?.value || "all",
-      group: $("ppGroupSelect")?.value || "all"
+      group: $("ppGroupSelect")?.value || "all",
+      customDate: $("ppCustomDate")?.value || ""
     };
   }
 
@@ -2280,7 +2285,7 @@ ${itemLines}`;
       })
     })).filter(snap => snap.items.length > 0);
 
-    const startDate = getRangeStartDate(view.range, snapshots);
+    const startDate = getRangeStartDate(view.range, snapshots, view.customDate);
     const ranged = snapshots.filter(snap => {
       if (!startDate) return true;
       return new Date(snap.ts) >= startDate;
@@ -2312,9 +2317,15 @@ ${itemLines}`;
     });
   }
 
-  function getRangeStartDate(range, snapshots){
+  function getRangeStartDate(range, snapshots, customDate){
     if (!snapshots.length || range === "all") return null;
     const end = new Date(snapshots[snapshots.length - 1].ts);
+    if (range === "custom") {
+      if (!customDate) return null;
+      const chosen = new Date(customDate + 'T00:00:00');
+      if (Number.isNaN(chosen.getTime())) return null;
+      return chosen;
+    }
     if (range === "ytd") return new Date(end.getFullYear(), 0, 1);
     const daysMap = { "7d": 7, "30d": 30, "90d": 90 };
     const days = daysMap[range];
@@ -2322,6 +2333,38 @@ ${itemLines}`;
     const start = new Date(end);
     start.setDate(start.getDate() - days + 1);
     return start;
+  }
+
+  function updateRangeOptionAvailability(){
+    const rangeEl = $("ppRange");
+    const customEl = $("ppCustomDate");
+    const snaps = purchasingPowerData?.snapshots || [];
+    if (!rangeEl || !snaps.length) return;
+    const first = new Date(snaps[0].ts);
+    const last = new Date(snaps[snaps.length - 1].ts);
+    const daysAvailable = Math.max(1, Math.floor((last - first) / 86400000) + 1);
+    const minByValue = { "30d": 30, "90d": 90 };
+    Array.from(rangeEl.options).forEach(opt => {
+      const needed = minByValue[opt.value];
+      if (!needed) {
+        opt.disabled = false;
+        if (opt.dataset.baseLabel) opt.textContent = opt.dataset.baseLabel;
+        return;
+      }
+      if (!opt.dataset.baseLabel) opt.dataset.baseLabel = opt.textContent;
+      const enabled = daysAvailable >= needed;
+      opt.disabled = !enabled;
+      opt.textContent = enabled ? opt.dataset.baseLabel : `${opt.dataset.baseLabel} (${daysAvailable}/${needed} days)`;
+    });
+    if (rangeEl.selectedOptions[0]?.disabled) {
+      rangeEl.value = "7d";
+    }
+    if (customEl) {
+      customEl.min = first.toISOString().slice(0,10);
+      customEl.max = last.toISOString().slice(0,10);
+      if (!customEl.value) customEl.value = first.toISOString().slice(0,10);
+      customEl.style.display = rangeEl.value === "custom" ? "inline-block" : "none";
+    }
   }
 
   function pctChange(first, last){
@@ -2338,6 +2381,8 @@ ${itemLines}`;
 
   function renderPurchasingPowerDashboard(){
     const view = getPurchasingPowerView();
+    const customEl = $("ppCustomDate");
+    if (customEl) customEl.style.display = view.range === "custom" ? "inline-block" : "none";
     const itemSel = $("ppItemSelect");
     if (itemSel) itemSel.disabled = view.viewMode !== "item";
     const filtered = applyPurchasingPowerFilters(purchasingPowerData, view);
@@ -2676,8 +2721,10 @@ ${lines.join("\n")}`;
     showItemGroceryTerms = Boolean(event?.target?.checked);
     renderItems();
   });
+  $("basketBaselineMode").value = "fixed";
   $("basketBaselineMode").addEventListener("change", renderBasket);
-  $("ppRange").addEventListener("change", renderPurchasingPowerDashboard);
+  $("ppRange").addEventListener("change", () => { updateRangeOptionAvailability(); renderPurchasingPowerDashboard(); });
+  $("ppCustomDate").addEventListener("change", renderPurchasingPowerDashboard);
   $("ppViewMode").addEventListener("change", renderPurchasingPowerDashboard);
   $("ppStaleMode").addEventListener("change", renderPurchasingPowerDashboard);
   $("ppItemSelect").addEventListener("change", renderPurchasingPowerDashboard);
