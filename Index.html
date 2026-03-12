@@ -986,12 +986,12 @@
     if (id === "cash10") {
       const usd = 10;
       const sats = isFinite(btcUsd) && btcUsd > 0 ? (usd / btcUsd) * 100000000 : NaN;
-      return { usd, sats, description: "$10 fixed" };
+      return { usd, sats, description: "$10" };
     }
     if (id === "sats10000") {
       const sats = 10000;
       const usd = isFinite(btcUsd) && btcUsd > 0 ? (sats / 100000000) * btcUsd : NaN;
-      return { usd, sats, description: "10,000 sats fixed" };
+      return { usd, sats, description: "10,000 Satoshis" };
     }
     return null;
   }
@@ -2112,10 +2112,12 @@
     const descriptionToItemId = new Map();
     const descriptions = cfg.items.map(item => {
       const latestRow = latest?.items?.find(x => x.id === item.id);
-      const description = isFixedItem(item.id)
-        ? (getFixedItemValues(item.id, latest?.btcUsd)?.description || item.name)
-        : (latestRow?.item_description || item.name || "");
+      const description = latestRow?.item_description || item.name || "";
       if (description) descriptionToItemId.set(normalizeKey(description), item.id);
+      if (isFixedItem(item.id)) {
+        const fixedDescription = getFixedItemValues(item.id, latest?.btcUsd)?.description || "";
+        if (fixedDescription) descriptionToItemId.set(normalizeKey(fixedDescription), item.id);
+      }
       return description;
     }).filter(Boolean);
 

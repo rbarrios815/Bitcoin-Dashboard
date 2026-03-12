@@ -658,14 +658,18 @@ function getBasketHistory() {
     snapshots[tsIso].push({
       id: idx.item_id != null ? String(row[idx.item_id] || '') : '',
       usd: Number(row[idx.usd]),
-      sats: Number(row[idx.sats])
+      sats: Number(row[idx.sats]),
+      btcUsd: Number(row[idx.btc_usd])
     });
   }
 
   const out = Object.keys(snapshots).map(ts => {
-    const weighted = computeWeightedBasketIndex_(snapshots[ts]);
+    const rows = snapshots[ts];
+    const weighted = computeWeightedBasketIndex_(rows);
+    const btcValues = rows.map(item => Number(item.btcUsd)).filter(isFinite);
     return {
       ts,
+      btcUsd: btcValues.length ? average_(btcValues) : NaN,
       basketIndexUsd: isFinite(weighted.usd) ? weighted.usd : 0,
       basketIndexSats: isFinite(weighted.sats) ? weighted.sats : 0
     };
