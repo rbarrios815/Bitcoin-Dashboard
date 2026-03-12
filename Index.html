@@ -703,33 +703,43 @@
 
   function setStatus(msg){ $("status").innerHTML = msg; }
 
+  function toFiniteNumber(value){
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+
   function fmtUsd(n){
-    if (!isFinite(n)) return "—";
-    return n.toLocaleString(undefined, { style: "currency", currency: "USD" });
+    const num = toFiniteNumber(n);
+    if (num == null) return "—";
+    return num.toLocaleString(undefined, { style: "currency", currency: "USD" });
   }
   function fmtSats(n){
-    if (!isFinite(n)) return "—";
-    return Math.round(n).toLocaleString() + " sats";
+    const num = toFiniteNumber(n);
+    if (num == null) return "—";
+    return Math.round(num).toLocaleString() + " sats";
   }
   function fmtBtc(n){
-    if (!isFinite(n)) return "—";
-    return n.toLocaleString(undefined, { maximumFractionDigits: 8 }) + " BTC";
+    const num = toFiniteNumber(n);
+    if (num == null) return "—";
+    return num.toLocaleString(undefined, { maximumFractionDigits: 8 }) + " BTC";
   }
   function fmtCommodity(n){
-    if (!isFinite(n)) return "—";
+    const num = toFiniteNumber(n);
+    if (num == null) return "—";
     const cfg = getCommodityConfig();
-    if (cfg.id === "dollars") return fmtUsd(n);
-    if (cfg.id === "grocery") return fmtUsd(n);
-    return n.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
+    if (cfg.id === "dollars") return fmtUsd(num);
+    if (cfg.id === "grocery") return fmtUsd(num);
+    return num.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
   }
   function fmtCommodityForMode(n, mode){
-    if (!isFinite(n)) return "—";
+    const num = toFiniteNumber(n);
+    if (num == null) return "—";
     const cfg = getCommodityConfigById(mode);
-    if (cfg.id === "dollars") return fmtUsd(n);
-    if (cfg.id === "grocery") return fmtUsd(n);
-    if (cfg.id === "sats") return `${Math.round(n).toLocaleString()} sats`;
-    if (cfg.id === "mwh") return `${n.toLocaleString(undefined, { maximumFractionDigits: 4 })} kWh`;
-    return n.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
+    if (cfg.id === "dollars") return fmtUsd(num);
+    if (cfg.id === "grocery") return fmtUsd(num);
+    if (cfg.id === "sats") return `${Math.round(num).toLocaleString()} sats`;
+    if (cfg.id === "mwh") return `${num.toLocaleString(undefined, { maximumFractionDigits: 4 })} kWh`;
+    return num.toLocaleString(undefined, { maximumFractionDigits: cfg.precision }) + " " + cfg.unitShort;
   }
   function fmtDate(d){
     if (!d) return "—";
