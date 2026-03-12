@@ -1804,53 +1804,47 @@
   }
 
   function getBasketItemsForTimestamp(itemHistories, ts, baselineMode, baselineTs, mode){
-    if (!Array.isArray(itemHistories) || !ts) return { presentItems: [], missingItems: [] };
-    let scoped = itemHistories;
-    if (baselineMode === "fixed" && baselineTs) {
-      const baselineDate = new Date(baselineTs);
-      scoped = itemHistories.filter(entry => entry.firstTs && new Date(entry.firstTs) <= baselineDate);
-    }
+    if (!Array.isArray(itemHistories) || !ts) return { allItems: [], presentItems: [], missingItems: [] };
 
-    const presentItems = [];
-    const missingItems = [];
-    scoped.forEach(entry => {
+    const allItems = itemHistories.map(entry => {
       const value = entry.historyMap.get(ts);
       const usd = Number(value?.usd);
       const sats = Number(value?.sats);
       const commodity = getCommodityValueForMode(mode, usd, sats, ts);
-      if (isFinite(usd) && isFinite(sats) && isFinite(commodity)) {
-        presentItems.push({
-          description: entry.description,
-          usd,
-          sats,
-          commodity
-        });
-      } else {
-        missingItems.push(entry.description);
-      }
+      return {
+        id: entry.id,
+        description: entry.description,
+        usd,
+        sats,
+        commodity,
+        hasValue: isFinite(usd) && isFinite(sats) && isFinite(commodity)
+      };
     });
-    return { presentItems, missingItems };
+
+    const presentItems = allItems.filter(item => item.hasValue);
+    const missingItems = allItems.filter(item => !item.hasValue).map(item => item.description);
+    return { allItems, presentItems, missingItems };
   }
 
   function buildBasketItemsTooltip(label, ts, itemState, mode){
     const prettyDate = fmtDate(ts);
     const unitCfg = getCommodityConfigById(mode);
     const header = `${label} (${prettyDate}) — ${unitCfg.label}`;
+    const allItems = itemState?.allItems || [];
     const present = itemState?.presentItems || [];
-    const missing = itemState?.missingItems || [];
-    if (!present.length && !missing.length) return `${header}\nNo item details available.`;
+    if (!allItems.length) return `${header}
+No item details available.`;
 
     const sum = present.reduce((acc, item) => acc + item.commodity, 0);
     const avg = present.length ? (sum / present.length) : NaN;
 
-    const formulaLine = `Basket index = average of present items in ${unitCfg.label}: ${fmtCommodityForMode(sum, mode)} ÷ ${present.length} = ${fmtCommodityForMode(avg, mode)}`;
-    const presentLines = present.length
-      ? present.map((item, idx) => `${idx + 1}. ${item.description}: ${fmtCommodityForMode(item.commodity, mode)}`).join("\n")
-      : "No items with prices.";
-    const missingLine = missing.length
-      ? `\nMissing at this snapshot: ${missing.join(", ")}`
-      : "";
-    return `${header}\n${formulaLine}\n${presentLines}${missingLine}`;
+    const formulaLine = `Basket index = average of priced items in ${unitCfg.label}: ${fmtCommodityForMode(sum, mode)} ÷ ${present.length} = ${fmtCommodityForMode(avg, mode)} (configured basket size: ${allItems.length} items).`;
+    const itemLines = allItems
+      .map((item, idx) => `${idx + 1}. ${item.description}: ${item.hasValue ? fmtCommodityForMode(item.commodity, mode) : "Missing"}`)
+      .join("\n");
+    return `${header}
+${formulaLine}
+${itemLines}`;
   }
 
   function renderBasketCommodityStats(hist, usdSeries, satsSeries, detailMeta){
@@ -2109,17 +2103,28 @@
 
   async function ensureBasketItemHistories(){
     if (basketItemHistories) return basketItemHistories;
+    const basketItems = cfg.items || [];
+    const itemMetaById = new Map();
     const descriptionToItemId = new Map();
-    const descriptions = cfg.items.map(item => {
+
+    basketItems.forEach(item => {
       const latestRow = latest?.items?.find(x => x.id === item.id);
-      const description = latestRow?.item_description || item.name || "";
+      const baseDescription = latestRow?.item_description || item.name || item.id || "";
+      const fixedDescription = isFixedItem(item.id)
+        ? (getFixedItemValues(item.id, latest?.btcUsd)?.description || "")
+        : "";
+      const description = fixedDescription || baseDescription;
       if (description) descriptionToItemId.set(normalizeKey(description), item.id);
-      if (isFixedItem(item.id)) {
-        const fixedDescription = getFixedItemValues(item.id, latest?.btcUsd)?.description || "";
-        if (fixedDescription) descriptionToItemId.set(normalizeKey(fixedDescription), item.id);
-      }
-      return description;
-    }).filter(Boolean);
+      itemMetaById.set(item.id, {
+        id: item.id,
+        description,
+        fallbackDescription: item.name || item.id || "Unknown Item"
+      });
+    });
+
+    const descriptions = Array.from(itemMetaById.values())
+      .map(item => item.description)
+      .filter(Boolean);
 
     const histories = await new Promise((resolve, reject) => {
       google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getAllItemHistories(descriptions);
@@ -2131,17 +2136,24 @@
       });
     }
     const basketSnapshotsByTs = new Map((referenceHistory.basket || []).map(snap => [snap.ts, Number(snap.btcUsd)]));
+    const historiesByItemId = new Map();
 
-    basketItemHistories = histories.map(entry => {
-      const history = entry.history || [];
+    (histories || []).forEach(entry => {
       const itemId = descriptionToItemId.get(normalizeKey(entry.description));
+      if (!itemId) return;
+      historiesByItemId.set(itemId, entry.history || []);
+    });
+
+    basketItemHistories = basketItems.map(item => {
+      const history = historiesByItemId.get(item.id) || [];
+      const meta = itemMetaById.get(item.id) || {};
       const historyMap = new Map(history.map(point => [
         point.ts,
         { usd: Number(point.usd), sats: Number(point.sats) }
       ]));
-      if (isFixedItem(itemId)) {
+      if (isFixedItem(item.id)) {
         basketSnapshotsByTs.forEach((btcUsd, ts) => {
-          const fixed = getFixedItemValues(itemId, btcUsd);
+          const fixed = getFixedItemValues(item.id, btcUsd);
           if (fixed && isFinite(fixed.usd) && isFinite(fixed.sats)) {
             historyMap.set(ts, { usd: fixed.usd, sats: fixed.sats });
           }
@@ -2150,18 +2162,19 @@
       const firstTs = history.length
         ? history[0].ts
         : (historyMap.size ? Array.from(historyMap.keys()).sort()[0] : null);
-      return { description: entry.description, historyMap, firstTs };
+      return {
+        id: item.id,
+        description: meta.description || meta.fallbackDescription || "Unknown Item",
+        historyMap,
+        firstTs
+      };
     });
     return basketItemHistories;
   }
 
   function buildFixedBasketSeries(hist, itemHistories){
     const baselineTs = hist.length ? hist[0].ts : null;
-    const baselineDate = baselineTs ? new Date(baselineTs) : null;
-    const baselineItems = itemHistories.filter(entry => {
-      if (!entry.firstTs || !baselineDate) return false;
-      return new Date(entry.firstTs) <= baselineDate;
-    });
+    const baselineItems = Array.isArray(itemHistories) ? itemHistories : [];
     const baselineCount = baselineItems.length;
     const usdSeries = [];
     const satsSeries = [];
