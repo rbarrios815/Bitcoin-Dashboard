@@ -31,6 +31,14 @@ const FIXED_BASKET_ITEMS_ = {
   sats10000: { sats: 10000 }
 };
 
+const REQUIRED_REFERENCE_ITEMS_ = [
+  { id: 'gold', name: 'Gold' },
+  { id: 'silver', name: 'Silver' },
+  { id: 'mwh', name: '5 kWh' },
+  { id: 'cash10', name: '$10' },
+  { id: 'sats10000', name: '10,000 Satoshis' }
+];
+
 /* =========================
    Web app entry
    ========================= */
@@ -1541,8 +1549,15 @@ function normalizeBasketItems_(items) {
 
 
 function validateBasketComposition_(items) {
+  const ids = new Set((items || []).map(item => String(item && item.id || '').trim().toLowerCase()));
+  const missingRequired = REQUIRED_REFERENCE_ITEMS_
+    .map(item => item.id)
+    .filter(id => !ids.has(id));
   const groceryCount = (items || []).filter(item => !isReferenceItemId_(item.id)).length;
   const totalCount = (items || []).length;
+  if (missingRequired.length) {
+    throw new Error('Basket composition must include required reference items: ' + missingRequired.join(', ') + '.');
+  }
   if (groceryCount !== 10 || totalCount !== 15) {
     throw new Error('Basket composition must include exactly 10 grocery items and 5 reference items (15 total). Update ITEM_LIST to include at least 10 groceries.');
   }
@@ -1555,11 +1570,7 @@ function ensureCommodityItems_(items) {
     items.push({ id, name, query: defaultQueryForItem_(name) });
     ids.add(id);
   };
-  addCommodity('gold', 'Gold');
-  addCommodity('silver', 'Silver');
-  addCommodity('mwh', '5 kWh');
-  addCommodity('cash10', '$10');
-  addCommodity('sats10000', '10,000 Satoshis');
+  REQUIRED_REFERENCE_ITEMS_.forEach(item => addCommodity(item.id, item.name));
 }
 
 function defaultQueryForItem_(itemName) {
