@@ -217,6 +217,15 @@
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap:10px;
     }
+    #basketStats{
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+    @media (max-width: 1200px){
+      #basketStats{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 780px){
+      #basketStats{ grid-template-columns: 1fr; }
+    }
     .basket-stat{
       border:1px solid rgba(255,255,255,.10);
       border-radius:14px;
@@ -1181,11 +1190,18 @@
       .filter(it => isGroceryDenominationItem(it.id))
       .map(it => {
         const row = latest.items.find(x => x.id === it.id);
-        const denomUsd = phase === "earliest" ? Number(row?.first_available?.usd) : Number(row?.usd);
+        const latestDenomUsd = Number(row?.usd);
+        const earliestDenomUsd = Number(row?.first_available?.usd);
+        const denomUsd = phase === "earliest" ? earliestDenomUsd : latestDenomUsd;
         if (!isFinite(denomUsd) || denomUsd <= 0) return "";
         const units = usdValue / denomUsd;
         if (!isFinite(units)) return "";
-        return `${units.toFixed(2)} ${escapeHtml(it.name)}`;
+        const earliestUnits = isFinite(earliestDenomUsd) && earliestDenomUsd > 0
+          ? usdValue / earliestDenomUsd
+          : NaN;
+        const termsClass = phase === "latest" ? priceCompareClass(units, earliestUnits) : "";
+        const termsValue = `${units.toFixed(2)} ${escapeHtml(it.name)}`;
+        return termsClass ? `<span class="${termsClass}">${termsValue}</span>` : termsValue;
       })
       .filter(Boolean);
     return parts.length ? parts.join(" • ") : `No ${label} grocery-item pricing available.`;
@@ -1758,7 +1774,9 @@
     const baselineItemsTitle = buildBasketItemsTooltip("Initial basket items", baselineTs, baselineItemState);
     const currentItemsTitle = buildBasketItemsTooltip("Current basket items", currentTs, currentItemState);
 
-    const rows = COMMODITIES.map(mode => {
+    const rows = COMMODITIES
+      .filter(mode => mode.id !== "grocery")
+      .map(mode => {
       const series = hist.map((point, idx) => {
         const usd = usdSeries[idx];
         const sats = satsSeries[idx];
