@@ -2109,23 +2109,45 @@
 
   async function ensureBasketItemHistories(){
     if (basketItemHistories) return basketItemHistories;
+    const descriptionToItemId = new Map();
     const descriptions = cfg.items.map(item => {
       const latestRow = latest?.items?.find(x => x.id === item.id);
-      if (isFixedItem(item.id)) return getFixedItemValues(item.id, latest?.btcUsd)?.description || item.name;
-      return latestRow?.item_description || item.name || "";
+      const description = isFixedItem(item.id)
+        ? (getFixedItemValues(item.id, latest?.btcUsd)?.description || item.name)
+        : (latestRow?.item_description || item.name || "");
+      if (description) descriptionToItemId.set(normalizeKey(description), item.id);
+      return description;
     }).filter(Boolean);
 
     const histories = await new Promise((resolve, reject) => {
       google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getAllItemHistories(descriptions);
     });
 
+    if (!referenceHistory.basket.length) {
+      referenceHistory.basket = await new Promise((resolve, reject) => {
+        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getBasketHistory();
+      });
+    }
+    const basketSnapshotsByTs = new Map((referenceHistory.basket || []).map(snap => [snap.ts, Number(snap.btcUsd)]));
+
     basketItemHistories = histories.map(entry => {
       const history = entry.history || [];
+      const itemId = descriptionToItemId.get(normalizeKey(entry.description));
       const historyMap = new Map(history.map(point => [
         point.ts,
         { usd: Number(point.usd), sats: Number(point.sats) }
       ]));
-      const firstTs = history.length ? history[0].ts : null;
+      if (isFixedItem(itemId)) {
+        basketSnapshotsByTs.forEach((btcUsd, ts) => {
+          const fixed = getFixedItemValues(itemId, btcUsd);
+          if (fixed && isFinite(fixed.usd) && isFinite(fixed.sats)) {
+            historyMap.set(ts, { usd: fixed.usd, sats: fixed.sats });
+          }
+        });
+      }
+      const firstTs = history.length
+        ? history[0].ts
+        : (historyMap.size ? Array.from(historyMap.keys()).sort()[0] : null);
       return { description: entry.description, historyMap, firstTs };
     });
     return basketItemHistories;
