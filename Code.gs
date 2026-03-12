@@ -6,7 +6,7 @@
  *   PRICE_API_HOST = product-item-search-price-comparison.p.rapidapi.com
  *   PRICE_API_SEARCH_URL = https://product-item-search-price-comparison.p.rapidapi.com/product_search
  *   DATA_SHEET_NAME = GroceryPriceHistory
- *   ITEM_LIST = apples,bananas,milk,bread,eggs,rice,chicken,ground beef,butter,potatoes,salt
+ *   ITEM_LIST = apples,bananas,milk,bread,eggs,rice,chicken,ground beef,butter,potatoes
  *
  * OPTIONAL Script Properties:
  *   COUNTRY_CODE = United States
@@ -26,7 +26,10 @@
  *   SERP_DEBUG - (optional) 'true' to log SerpAPI debug output
  ************************/
 
-const MWH_TO_KWH_ = 1000;
+const FIXED_BASKET_ITEMS_ = {
+  cash10: { usd: 10 },
+  sats10000: { sats: 10000 }
+};
 
 /* =========================
    Web app entry
@@ -77,7 +80,34 @@ function setupOnce() {
    ========================= */
 
 function basketWeightForItemId_(itemId) {
-  return String(itemId || "").toLowerCase() === "mwh" ? (1 / MWH_TO_KWH_) : 1;
+  return 1;
+}
+
+function getFixedBasketValue_(itemId, btcUsd) {
+  const id = String(itemId || '').trim().toLowerCase();
+  const fixed = FIXED_BASKET_ITEMS_[id];
+  if (!fixed) return null;
+
+  const usd = isFinite(fixed.usd)
+    ? Number(fixed.usd)
+    : (isFinite(fixed.sats) && isFinite(btcUsd) && btcUsd > 0)
+      ? (Number(fixed.sats) / 100000000) * btcUsd
+      : NaN;
+  const sats = isFinite(fixed.sats)
+    ? Number(fixed.sats)
+    : (isFinite(fixed.usd) && isFinite(btcUsd) && btcUsd > 0)
+      ? usdToSats_(Number(fixed.usd), btcUsd)
+      : NaN;
+
+  return {
+    usd: isFinite(usd) ? usd : 0,
+    sats: isFinite(sats) ? sats : 0
+  };
+}
+
+function isFixedBasketItemId_(itemId) {
+  const id = String(itemId || '').trim().toLowerCase();
+  return Boolean(FIXED_BASKET_ITEMS_[id]);
 }
 
 function computeWeightedBasketIndex_(items) {
@@ -124,7 +154,7 @@ function fetchLatestSnapshot() {
   const snapshotTs = new Date().toISOString();
   const btcUsd = fetchBtcUsd_(props);
   const items = parseItems_(props.itemList);
-  const fetchableItems = items.filter(item => item.id !== 'cash10');
+  const fetchableItems = items.filter(item => !isFixedBasketItemId_(item.id));
 
   // 1) RapidAPI batch fetch (includes per-item cache reads/writes)
   const rapid = fetchItemsUsdRapidApiBatch_(fetchableItems, props);
@@ -143,16 +173,16 @@ function fetchLatestSnapshot() {
 
   // 3) Finalize items with fallback to last-known
   const priced = items.map(it => {
-    if (it.id === 'cash10') {
-      const usd = 10;
+    if (isFixedBasketItemId_(it.id)) {
+      const fixed = getFixedBasketValue_(it.id, btcUsd);
       return {
         id: it.id,
         name: it.name,
         query: it.query,
         item_description: applyItemDescription_(it.name, null, null),
         ts: snapshotTs,
-        usd: usd,
-        sats: usdToSats_(usd, btcUsd),
+        usd: fixed ? fixed.usd : 0,
+        sats: fixed ? fixed.sats : 0,
         source_url: '',
         price_source: 'fixed',
         price_vendor: '',
@@ -343,14 +373,12 @@ function getLatestSnapshotFromSheet() {
         name: it.name,
         query: it.query,
         item_description: applyItemDescription_(it.name, null, null),
-        usd: it.id === 'cash10' ? 10 : 0,
-        sats: it.id === 'cash10' && isFinite(fallbackBtcUsd)
-          ? usdToSats_(10, fallbackBtcUsd)
-          : 0,
+        usd: isFixedBasketItemId_(it.id) ? (getFixedBasketValue_(it.id, fallbackBtcUsd) || { usd: 0 }).usd : 0,
+        sats: isFixedBasketItemId_(it.id) ? (getFixedBasketValue_(it.id, fallbackBtcUsd) || { sats: 0 }).sats : 0,
         source_url: '',
-        price_source: it.id === 'cash10' ? 'fixed' : '',
+        price_source: isFixedBasketItemId_(it.id) ? 'fixed' : '',
         price_vendor: '',
-        is_stale: it.id === 'cash10' ? false : true,
+        is_stale: isFixedBasketItemId_(it.id) ? false : true,
         first_available: null,
         vendor_count: 0
       })),
@@ -463,16 +491,16 @@ function getLatestSnapshotFromSheet() {
       || earliestByDescription[normalized]
       || null;
     const description = latestRow?.item_description || fallbackDescription;
-    if (it.id === 'cash10') {
-      const cashSats = isFinite(latestBtcUsd) ? usdToSats_(10, latestBtcUsd) : 0;
+    if (isFixedBasketItemId_(it.id)) {
+      const fixed = getFixedBasketValue_(it.id, latestBtcUsd);
       return {
         id: it.id,
         name: it.name,
         query: it.query,
         item_description: description,
         ts: latestTs ? latestTs.toISOString() : null,
-        usd: 10,
-        sats: cashSats,
+        usd: fixed ? fixed.usd : 0,
+        sats: fixed ? fixed.sats : 0,
         source_url: '',
         price_source: 'fixed',
         price_vendor: '',
@@ -929,7 +957,7 @@ function uniqueValues_(values) {
 
 function isReferenceItemId_(itemId) {
   const id = String(itemId || '').trim().toLowerCase();
-  return id === 'gold' || id === 'silver' || id === 'mwh' || id === 'cash10';
+  return id === 'gold' || id === 'silver' || id === 'mwh' || id === 'cash10' || id === 'sats10000';
 }
 
 /* =========================
@@ -1475,7 +1503,7 @@ function validateSheetProps_(p) {
 
 function parseItems_(itemList) {
   const raw = itemList.split(',').map(s => s.trim()).filter(Boolean);
-  const items = [];
+  let items = [];
   raw.forEach(token => {
     if (token.includes('|')) {
       const parts = token.split('|').map(x => x.trim());
@@ -1487,8 +1515,36 @@ function parseItems_(itemList) {
       items.push({ id: slug_(token), name: title_(token), query: defaultQueryForItem_(token) });
     }
   });
+  items = normalizeBasketItems_(items);
   ensureCommodityItems_(items);
+  validateBasketComposition_(items);
   return items;
+}
+
+function normalizeBasketItems_(items) {
+  const normalized = [];
+  const seenIds = {};
+
+  (items || []).forEach(item => {
+    const id = String(item && item.id || '').trim().toLowerCase();
+    if (!id || seenIds[id]) return;
+    seenIds[id] = true;
+    normalized.push(item);
+  });
+
+  const grocery = normalized.filter(item => !isReferenceItemId_(item.id));
+  const cappedGrocery = grocery.slice(0, 10);
+
+  return cappedGrocery;
+}
+
+
+function validateBasketComposition_(items) {
+  const groceryCount = (items || []).filter(item => !isReferenceItemId_(item.id)).length;
+  const totalCount = (items || []).length;
+  if (groceryCount !== 10 || totalCount !== 15) {
+    throw new Error('Basket composition must include exactly 10 grocery items and 5 reference items (15 total). Update ITEM_LIST to include at least 10 groceries.');
+  }
 }
 
 function ensureCommodityItems_(items) {
@@ -1500,8 +1556,9 @@ function ensureCommodityItems_(items) {
   };
   addCommodity('gold', 'Gold');
   addCommodity('silver', 'Silver');
-  addCommodity('mwh', 'kWh');
+  addCommodity('mwh', '5 kWh');
   addCommodity('cash10', '$10');
+  addCommodity('sats10000', '10,000 Satoshis');
 }
 
 function defaultQueryForItem_(itemName) {
@@ -1509,7 +1566,7 @@ function defaultQueryForItem_(itemName) {
   const overrides = {
     gold: '0.1 gram gold bar',
     silver: '1 gram silver bar',
-    mwh: '1 kWh electricity',
+    mwh: '5 kWh electricity',
     'ground beef': 'ground beef 80/20 1 lb',
     salt: 'iodized table salt 26 oz'
   };
@@ -1770,7 +1827,8 @@ function getStandardItemDescription_(itemName) {
     salt: 'Iodized table salt 26 oz',
     gold: 'Gold 0.1 gram bar',
     silver: 'Silver 1 gram bar',
-    mwh: 'Electricity 1 kWh'
+    mwh: 'Electricity 5 kWh',
+    sats10000: '10,000 satoshis'
   };
   if (descriptionOverrides[normalized]) return descriptionOverrides[normalized];
   return '';
@@ -1814,8 +1872,10 @@ function getItemDescription_(itemName, serpResult) {
       return 'Gold bullion bar weighing approximately 0.1 gram.';
     case 'silver 1 gram bar':
       return 'Silver bullion bar weighing approximately 1 gram.';
-    case 'electricity 1 kwh':
-      return 'Electricity energy quantity equivalent to 1 kilowatt-hour.';
+    case 'electricity 5 kwh':
+      return 'Electricity energy quantity equivalent to 5 kilowatt-hours.';
+    case '10,000 satoshis':
+      return 'Bitcoin quantity equal to 10,000 satoshis (0.0001 BTC).';
     default: {
       const fallback = String(itemName || '').trim();
       return fallback || 'Grocery item.';

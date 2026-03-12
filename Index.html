@@ -688,7 +688,8 @@
   const FETCH_MAX_MS = 60000;
 
   const GOLD_UNIT_GRAMS = 0.1;
-  const MWH_TO_KWH = 1000;
+  const KWH_REFERENCE_UNITS = 5;
+  const FIXED_ITEM_IDS = ["cash10", "sats10000"];
   const COMMODITIES = [
     { id: "grocery", label: "Grocery Items", unitLabel: "USD per item", unitShort: "$/item", precision: 2 },
     { id: "sats", label: "Satoshis", unitLabel: "sats", unitShort: "sats", precision: 2 },
@@ -970,9 +971,26 @@
   }
 
   function getBasketWeightByItemId(itemId){
-    const normalized = String(itemId || "").trim().toLowerCase();
-    if (normalized === "mwh") return 1 / MWH_TO_KWH;
     return 1;
+  }
+
+  function isFixedItem(itemId){
+    return FIXED_ITEM_IDS.includes(String(itemId || "").trim().toLowerCase());
+  }
+
+  function getFixedItemValues(itemId, btcUsd){
+    const id = String(itemId || "").trim().toLowerCase();
+    if (id === "cash10") {
+      const usd = 10;
+      const sats = isFinite(btcUsd) && btcUsd > 0 ? (usd / btcUsd) * 100000000 : NaN;
+      return { usd, sats, description: "$10 fixed" };
+    }
+    if (id === "sats10000") {
+      const sats = 10000;
+      const usd = isFinite(btcUsd) && btcUsd > 0 ? (sats / 100000000) * btcUsd : NaN;
+      return { usd, sats, description: "10,000 sats fixed" };
+    }
+    return null;
   }
 
   function updateCommodityTitle(){
@@ -1092,7 +1110,7 @@
       }
       case "mwh": {
         const ref = getReferenceUsd("mwh", ts);
-        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) * MWH_TO_KWH : NaN;
+        return isFinite(usd) && isFinite(ref) && ref > 0 ? (usd / ref) * KWH_REFERENCE_UNITS : NaN;
       }
       case "grocery":
       default:
@@ -1162,17 +1180,15 @@
 
     cfg.items.forEach(it => {
       const row = latest?.items?.find(x => x.id === it.id);
-      const isCashTen = it.id === "cash10";
+      const fixed = getFixedItemValues(it.id, latest?.btcUsd);
       const latestTs = row?.ts || latest?.ts;
-      const cashUsd = 10;
-      const cashSats = isFinite(latest?.btcUsd) ? (cashUsd / latest.btcUsd) * 100000000 : NaN;
-      const usd = isCashTen ? cashUsd : (isFinite(Number(row?.usd)) ? Number(row?.usd) : (isFinite(Number(row?.sats)) && isFinite(Number(latest?.btcUsd)) ? (Number(row.sats) * Number(latest.btcUsd) / 100000000) : NaN));
+      const usd = fixed ? fixed.usd : (isFinite(Number(row?.usd)) ? Number(row?.usd) : (isFinite(Number(row?.sats)) && isFinite(Number(latest?.btcUsd)) ? (Number(row.sats) * Number(latest.btcUsd) / 100000000) : NaN));
       const normalizedUsd = usd;
-      const sats = isCashTen ? cashSats : row?.sats;
-      const stale = isCashTen ? false : Boolean(row?.is_stale);
+      const sats = fixed ? fixed.sats : row?.sats;
+      const stale = fixed ? false : Boolean(row?.is_stale);
       const source = row?.price_source || "";
       const vendor = row?.price_vendor || "";
-      const description = isCashTen ? "$10 fixed" : (row?.item_description || it.name);
+      const description = fixed ? fixed.description : (row?.item_description || it.name);
       const sourceUrl = getSourceUrl(row);
       const first = row?.first_available;
       const firstDate = fmtDate(first?.ts);
@@ -1186,7 +1202,7 @@
       const firstMwh = first ? fmtCommodityForMode(firstMwhValue, "mwh") : "—";
       const vendorCount = Number.isFinite(row?.vendor_count) ? row.vendor_count : 0;
       const satsClass = priceCompareClass(sats, first?.sats);
-      const isUnverified = !stale && !hasSourceUrl(row) && !isCashTen;
+      const isUnverified = !stale && !hasSourceUrl(row) && !fixed;
       const latestTsLabel = latestTs ? fmtDateTime(latestTs) : "—";
       const latestGoldValue = getCommodityValueForMode("gold", normalizedUsd, sats, latestTs);
       const latestSilverValue = getCommodityValueForMode("silver", normalizedUsd, sats, latestTs);
@@ -1246,7 +1262,7 @@
   }
 
   function isGroceryDenominationItem(itemId){
-    return !["gold", "silver", "mwh", "cash10"].includes(String(itemId || "").toLowerCase());
+    return !["gold", "silver", "mwh", "cash10", "sats10000"].includes(String(itemId || "").toLowerCase());
   }
 
   function buildGroceryTermsSummary(usdValue, phase){
@@ -1537,7 +1553,7 @@
 
       const descriptions = orderedItems.map(item => {
         const latestRow = latest?.items?.find(x => x.id === item.id);
-        if (item.id === "cash10") return "$10 fixed";
+        if (isFixedItem(item.id)) return getFixedItemValues(item.id, latest?.btcUsd)?.description || item.name;
         return latestRow?.item_description || item?.name || "";
       }).filter(Boolean);
 
@@ -1568,7 +1584,9 @@
 
     const item = cfg.items.find(x => x.id === activeItemId);
     const latestRow = latest?.items?.find(x => x.id === activeItemId);
-    const description = activeItemId === "cash10" ? "$10 fixed" : (latestRow?.item_description || item?.name || "Item history");
+    const description = isFixedItem(activeItemId)
+      ? (getFixedItemValues(activeItemId, latest?.btcUsd)?.description || "Fixed item")
+      : (latestRow?.item_description || item?.name || "Item history");
 
     const hist = await new Promise((resolve, reject) => {
       google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getItemHistory(description);
@@ -2090,7 +2108,7 @@
     if (basketItemHistories) return basketItemHistories;
     const descriptions = cfg.items.map(item => {
       const latestRow = latest?.items?.find(x => x.id === item.id);
-      if (item.id === "cash10") return "$10 fixed";
+      if (isFixedItem(item.id)) return getFixedItemValues(item.id, latest?.btcUsd)?.description || item.name;
       return latestRow?.item_description || item.name || "";
     }).filter(Boolean);
 
