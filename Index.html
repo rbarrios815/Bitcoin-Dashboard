@@ -494,13 +494,14 @@
           <span class="filter-label">Range</span>
           <select id="ppRange">
             <option value="7d">7D</option>
-            <option value="30d" selected>30D</option>
+            <option value="30d">30D</option>
             <option value="90d">90D</option>
             <option value="ytd">YTD</option>
-            <option value="all">All</option>
-            <option value="custom">Custom date</option>
+            <option value="all" selected>All</option>
+            <option value="custom">Custom range</option>
           </select>
-          <input type="date" id="ppCustomDate" style="display:none;" />
+          <input type="date" id="ppCustomStartDate" style="display:none;" aria-label="Custom start date" />
+          <input type="date" id="ppCustomEndDate" style="display:none;" aria-label="Custom end date" />
           <span class="filter-label">View</span>
           <select id="ppViewMode">
             <option value="basket" selected>Basket view</option>
@@ -1212,17 +1213,20 @@
       const description = fixed ? fixed.description : (row?.item_description || it.name);
       const sourceUrl = getSourceUrl(row);
       const first = row?.first_available;
-      const firstDate = fmtDate(first?.ts);
-      const firstUsd = first?.usd;
-      const firstSats = first?.sats != null ? fmtSats(first.sats) : "—";
-      const firstGoldValue = first ? getCommodityValueForMode("gold", firstUsd, first.sats, first.ts) : NaN;
-      const firstSilverValue = first ? getCommodityValueForMode("silver", firstUsd, first.sats, first.ts) : NaN;
-      const firstMwhValue = first ? getCommodityValueForMode("mwh", firstUsd, first.sats, first.ts) : NaN;
-      const firstGold = first ? fmtCommodityForMode(firstGoldValue, "gold") : "—";
-      const firstSilver = first ? fmtCommodityForMode(firstSilverValue, "silver") : "—";
-      const firstMwh = first ? fmtCommodityForMode(firstMwhValue, "mwh") : "—";
+      const derivedFirst = first || ((isFinite(normalizedUsd) || isFinite(Number(sats))) && latestTs
+        ? { ts: latestTs, usd: normalizedUsd, sats: isFinite(Number(sats)) ? Number(sats) : NaN }
+        : null);
+      const firstDate = fmtDate(derivedFirst?.ts);
+      const firstUsd = derivedFirst?.usd;
+      const firstSats = derivedFirst?.sats != null ? fmtSats(derivedFirst.sats) : "—";
+      const firstGoldValue = derivedFirst ? getCommodityValueForMode("gold", firstUsd, derivedFirst.sats, derivedFirst.ts) : NaN;
+      const firstSilverValue = derivedFirst ? getCommodityValueForMode("silver", firstUsd, derivedFirst.sats, derivedFirst.ts) : NaN;
+      const firstMwhValue = derivedFirst ? getCommodityValueForMode("mwh", firstUsd, derivedFirst.sats, derivedFirst.ts) : NaN;
+      const firstGold = derivedFirst ? fmtCommodityForMode(firstGoldValue, "gold") : "—";
+      const firstSilver = derivedFirst ? fmtCommodityForMode(firstSilverValue, "silver") : "—";
+      const firstMwh = derivedFirst ? fmtCommodityForMode(firstMwhValue, "mwh") : "—";
       const vendorCount = Number.isFinite(row?.vendor_count) ? row.vendor_count : 0;
-      const satsClass = priceCompareClass(sats, first?.sats);
+      const satsClass = priceCompareClass(sats, derivedFirst?.sats);
       const isUnverified = !stale && !hasSourceUrl(row) && !fixed;
       const latestTsLabel = latestTs ? fmtDateTime(latestTs) : "—";
       const latestGoldValue = getCommodityValueForMode("gold", normalizedUsd, sats, latestTs);
@@ -1948,7 +1952,7 @@ ${itemLines}`;
       } else {
         const lastVal = [...normalizedSeries].reverse().find(val => isFinite(val));
         const lastLabel = [...labels].reverse().find((_, idx) => isFinite(normalizedSeries[normalizedSeries.length - 1 - idx])) || "latest";
-        noteEl.textContent = `Baseline set to ${baselineLabel || "the first snapshot"} (index = 100). Latest index is ${isFinite(lastVal) ? lastVal.toFixed(2) : "—"} as of ${lastLabel}. The ${scopeLabel} applies.`;
+        noteEl.textContent = `Baseline set to ${baselineLabel || "the first snapshot"} (index = 100). Latest index is ${isFinite(lastVal) ? lastVal.toFixed(2) : "—"} as of ${lastLabel}. This means the latest basket is ${isFinite(lastVal) ? lastVal.toFixed(2) + '% of the baseline level' : 'not available versus baseline'} (100 = same as baseline, above 100 = higher, below 100 = lower). The ${scopeLabel} applies.`;
       }
     }
 
@@ -2279,12 +2283,13 @@ ${itemLines}`;
 
   function getPurchasingPowerView(){
     return {
-      range: $("ppRange")?.value || "30d",
+      range: $("ppRange")?.value || "all",
       viewMode: $("ppViewMode")?.value || "basket",
       staleMode: $("ppStaleMode")?.value || "include",
       itemKey: $("ppItemSelect")?.value || "all",
       group: $("ppGroupSelect")?.value || "all",
-      customDate: $("ppCustomDate")?.value || ""
+      customStartDate: $("ppCustomStartDate")?.value || "",
+      customEndDate: $("ppCustomEndDate")?.value || ""
     };
   }
 
@@ -2299,10 +2304,12 @@ ${itemLines}`;
       })
     })).filter(snap => snap.items.length > 0);
 
-    const startDate = getRangeStartDate(view.range, snapshots, view.customDate);
+    const rangeBounds = getRangeBounds(view.range, snapshots, view.customStartDate, view.customEndDate);
     const ranged = snapshots.filter(snap => {
-      if (!startDate) return true;
-      return new Date(snap.ts) >= startDate;
+      const snapDate = new Date(snap.ts);
+      if (rangeBounds.startDate && snapDate < rangeBounds.startDate) return false;
+      if (rangeBounds.endDate && snapDate > rangeBounds.endDate) return false;
+      return true;
     });
 
     return ranged.map(snap => {
@@ -2331,27 +2338,32 @@ ${itemLines}`;
     });
   }
 
-  function getRangeStartDate(range, snapshots, customDate){
-    if (!snapshots.length || range === "all") return null;
+  function getRangeBounds(range, snapshots, customStartDate, customEndDate){
+    if (!snapshots.length || range === "all") return { startDate: null, endDate: null };
     const end = new Date(snapshots[snapshots.length - 1].ts);
     if (range === "custom") {
-      if (!customDate) return null;
-      const chosen = new Date(customDate + 'T00:00:00');
-      if (Number.isNaN(chosen.getTime())) return null;
-      return chosen;
+      const startDate = customStartDate ? new Date(customStartDate + 'T00:00:00') : null;
+      const endDate = customEndDate ? new Date(customEndDate + 'T23:59:59.999') : null;
+      const validStart = startDate && !Number.isNaN(startDate.getTime()) ? startDate : null;
+      const validEnd = endDate && !Number.isNaN(endDate.getTime()) ? endDate : null;
+      if (validStart && validEnd && validStart > validEnd) {
+        return { startDate: new Date(validEnd.getTime()), endDate: new Date(validStart.getTime() + 86399999) };
+      }
+      return { startDate: validStart, endDate: validEnd };
     }
-    if (range === "ytd") return new Date(end.getFullYear(), 0, 1);
+    if (range === "ytd") return { startDate: new Date(end.getFullYear(), 0, 1), endDate: null };
     const daysMap = { "7d": 7, "30d": 30, "90d": 90 };
     const days = daysMap[range];
-    if (!days) return null;
+    if (!days) return { startDate: null, endDate: null };
     const start = new Date(end);
     start.setDate(start.getDate() - days + 1);
-    return start;
+    return { startDate: start, endDate: null };
   }
 
   function updateRangeOptionAvailability(){
     const rangeEl = $("ppRange");
-    const customEl = $("ppCustomDate");
+    const customStartEl = $("ppCustomStartDate");
+    const customEndEl = $("ppCustomEndDate");
     const snaps = purchasingPowerData?.snapshots || [];
     if (!rangeEl || !snaps.length) return;
     const first = new Date(snaps[0].ts);
@@ -2373,11 +2385,19 @@ ${itemLines}`;
     if (rangeEl.selectedOptions[0]?.disabled) {
       rangeEl.value = "7d";
     }
-    if (customEl) {
-      customEl.min = first.toISOString().slice(0,10);
-      customEl.max = last.toISOString().slice(0,10);
-      if (!customEl.value) customEl.value = first.toISOString().slice(0,10);
-      customEl.style.display = rangeEl.value === "custom" ? "inline-block" : "none";
+    const firstIso = first.toISOString().slice(0,10);
+    const lastIso = last.toISOString().slice(0,10);
+    if (customStartEl) {
+      customStartEl.min = firstIso;
+      customStartEl.max = lastIso;
+      if (!customStartEl.value) customStartEl.value = firstIso;
+      customStartEl.style.display = rangeEl.value === "custom" ? "inline-block" : "none";
+    }
+    if (customEndEl) {
+      customEndEl.min = firstIso;
+      customEndEl.max = lastIso;
+      if (!customEndEl.value) customEndEl.value = lastIso;
+      customEndEl.style.display = rangeEl.value === "custom" ? "inline-block" : "none";
     }
   }
 
@@ -2395,8 +2415,10 @@ ${itemLines}`;
 
   function renderPurchasingPowerDashboard(){
     const view = getPurchasingPowerView();
-    const customEl = $("ppCustomDate");
-    if (customEl) customEl.style.display = view.range === "custom" ? "inline-block" : "none";
+    const customStartEl = $("ppCustomStartDate");
+    const customEndEl = $("ppCustomEndDate");
+    if (customStartEl) customStartEl.style.display = view.range === "custom" ? "inline-block" : "none";
+    if (customEndEl) customEndEl.style.display = view.range === "custom" ? "inline-block" : "none";
     const itemSel = $("ppItemSelect");
     if (itemSel) itemSel.disabled = view.viewMode !== "item";
     const filtered = applyPurchasingPowerFilters(purchasingPowerData, view);
@@ -2657,15 +2679,29 @@ ${lines.join("\n")}`;
     lastMap.forEach((latestItem, key) => {
       const firstItem = firstMap.get(key);
       if (!firstItem) return;
-      const usdCh = pctChange(Number(firstItem.usd), Number(latestItem.usd));
-      const satsCh = pctChange(Number(firstItem.sats), Number(latestItem.sats));
+      const earliestUsd = Number(firstItem.usd);
+      const latestUsd = Number(latestItem.usd);
+      const earliestSats = Number(firstItem.sats);
+      const latestSats = Number(latestItem.sats);
+      const resolvedEarliestSats = isFinite(earliestSats)
+        ? earliestSats
+        : (isFinite(earliestUsd) && isFinite(Number(firstSnap.btcUsd)) && Number(firstSnap.btcUsd) > 0
+            ? (earliestUsd / Number(firstSnap.btcUsd)) * 100000000
+            : NaN);
+      const resolvedLatestSats = isFinite(latestSats)
+        ? latestSats
+        : (isFinite(latestUsd) && isFinite(Number(lastSnap.btcUsd)) && Number(lastSnap.btcUsd) > 0
+            ? (latestUsd / Number(lastSnap.btcUsd)) * 100000000
+            : NaN);
+      const usdCh = pctChange(earliestUsd, latestUsd);
+      const satsCh = pctChange(resolvedEarliestSats, resolvedLatestSats);
       rows.push({
         key,
         item: latestItem.description,
-        earliestUsd: Number(firstItem.usd),
-        earliestSats: Number(firstItem.sats),
-        usd: Number(latestItem.usd),
-        sats: Number(latestItem.sats),
+        earliestUsd,
+        earliestSats: resolvedEarliestSats,
+        usd: latestUsd,
+        sats: resolvedLatestSats,
         usdCh,
         satsCh
       });
@@ -2738,7 +2774,8 @@ ${lines.join("\n")}`;
   $("basketBaselineMode").value = "fixed";
   $("basketBaselineMode").addEventListener("change", renderBasket);
   $("ppRange").addEventListener("change", () => { updateRangeOptionAvailability(); renderPurchasingPowerDashboard(); });
-  $("ppCustomDate").addEventListener("change", renderPurchasingPowerDashboard);
+  $("ppCustomStartDate").addEventListener("change", renderPurchasingPowerDashboard);
+  $("ppCustomEndDate").addEventListener("change", renderPurchasingPowerDashboard);
   $("ppViewMode").addEventListener("change", renderPurchasingPowerDashboard);
   $("ppStaleMode").addEventListener("change", renderPurchasingPowerDashboard);
   $("ppItemSelect").addEventListener("change", renderPurchasingPowerDashboard);
