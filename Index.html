@@ -1921,12 +1921,12 @@ ${itemLines}`;
         <div class="basket-stat ${boxCls}">
           <div class="label">${escapeHtml(mode.label)}</div>
           <div class="metric">
-            <div class="label-text is-current hoverable" tabindex="0" data-tooltip="${basketIndexTitle}">Current basket index</div>
-            <strong class="${trendCls}">${escapeHtml(fmtCommodityForMode(last, mode.id))}</strong>${currentSatsInline}
-          </div>
-          <div class="metric">
             <div class="label-text hoverable" tabindex="0" data-tooltip="${baselineTitle}">Original baseline basket index</div>
             <strong class="baseline-value">${escapeHtml(fmtCommodityForMode(baseline, mode.id))}</strong>${baselineSatsInline}
+          </div>
+          <div class="metric">
+            <div class="label-text is-current hoverable" tabindex="0" data-tooltip="${basketIndexTitle}">Current basket index</div>
+            <strong class="${trendCls}">${escapeHtml(fmtCommodityForMode(last, mode.id))}</strong>${currentSatsInline}
           </div>
           <div class="metric ${boxCls}">
             <div class="inflation-label">Inflation vs baseline</div>
