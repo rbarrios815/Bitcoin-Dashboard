@@ -605,7 +605,7 @@
           Inflation vs baseline is defined as ((latest basket index ÷ baseline basket index) − 1) × 100.
           Positive percentages are shown in red (inflation), while negative percentages are shown in green (deflation).
         </div>
-        <div class="note">How to read these charts: Basket Inflation shows basket cost over time in the selected unit. Normalized Basket Index is calculated as (basket value ÷ first visible basket value) × 100, so 100 is the baseline, above 100 means cost increased, and below 100 means cost decreased. Basket indexes are computed as average cost per tracked item so comparisons stay fair if basket size changes. Basket Change by Item uses USD delta per item (latest USD − baseline USD); all item deltas add up to the total basket USD move, where positive values push inflation higher and negative values pull it lower.</div>
+        <div class="note">How to read these charts: Basket Inflation shows basket cost over time in the selected unit. Basket indexes are computed as average cost per tracked item so comparisons stay fair if basket size changes. Basket Change by Item uses USD delta per item (latest USD − baseline USD); all item deltas add up to the total basket USD move, where positive values push inflation higher and negative values pull it lower.</div>
       </div>
       <div class="note" id="basketBaselineNote"></div>
       <div class="basket-stats" id="basketStats"></div>
@@ -615,13 +615,6 @@
         <canvas id="basketChart"></canvas>
       </div>
       <div class="note" id="basketChartNote"></div>
-
-      <div style="height:12px"></div>
-      <div class="chart-title">Normalized basket index (baseline = 100)</div>
-      <div class="chartBox">
-        <canvas id="basketIndexChart"></canvas>
-      </div>
-      <div class="note" id="basketIndexNote"></div>
 
       <div style="height:12px"></div>
       <div class="chart-title">Basket change by item (USD delta vs baseline)</div>
@@ -706,7 +699,6 @@
 
   let itemCharts = [];
   let basketChart = null;
-  let basketIndexChart = null;
   let basketContributionChart = null;
   let fetchProgressTimer = null;
   let fetchProgressHideTimer = null;
@@ -1745,7 +1737,6 @@
     const lastUsd = [...usdSeries].reverse().find(val => isFinite(val));
     const noteEl = $("basketChartNote");
     const scopeLabel = basketBaselineMode === "fixed" ? "fixed baseline item set" : "rolling item set";
-    const baselineLabel = baselineMeta?.baselineLabel || "the first snapshot";
     if (noteEl) {
       const firstIndex = usdSeries.findIndex(val => isFinite(val));
       const reverseIndex = [...usdSeries].reverse().findIndex(val => isFinite(val));
@@ -1847,8 +1838,6 @@
       currentTs,
       baselineMode: basketBaselineMode
     });
-
-    buildNormalizedBasketChart(labels, usdSeries, baselineLabel, scopeLabel);
 
     const baselineChartIndex = getFirstFiniteSeriesIndex(usdSeries);
     const baselineChartTs = baselineChartIndex >= 0 ? hist[baselineChartIndex]?.ts : null;
@@ -1967,60 +1956,6 @@ ${itemLines}`;
       `;
     }).join("");
     wrap.innerHTML = rows || "";
-  }
-
-  function buildNormalizedBasketChart(labels, usdSeries, baselineLabel, scopeLabel){
-    const baselineValue = getFirstFinite(usdSeries);
-    const normalizedSeries = usdSeries.map(val => {
-      if (!isFinite(val) || !isFinite(baselineValue) || baselineValue === 0) return null;
-      return (val / baselineValue) * 100;
-    });
-
-    const noteEl = $("basketIndexNote");
-    if (noteEl) {
-      if (!isFinite(baselineValue)) {
-        noteEl.textContent = "No basket history yet. Record snapshots to see the normalized index.";
-      } else {
-        const lastVal = [...normalizedSeries].reverse().find(val => isFinite(val));
-        const lastLabel = [...labels].reverse().find((_, idx) => isFinite(normalizedSeries[normalizedSeries.length - 1 - idx])) || "latest";
-        noteEl.textContent = `Baseline set to ${baselineLabel || "the first snapshot"} (index = 100). Latest index is ${isFinite(lastVal) ? lastVal.toFixed(2) : "—"} as of ${lastLabel}. This means the latest basket is ${isFinite(lastVal) ? lastVal.toFixed(2) + '% of the baseline level' : 'not available versus baseline'} (100 = same as baseline, above 100 = higher, below 100 = lower). The ${scopeLabel} applies.`;
-      }
-    }
-
-    basketIndexChart = destroyChartSafe(basketIndexChart);
-    const ctx = $("basketIndexChart")?.getContext("2d");
-    if (!ctx) return;
-    basketIndexChart = new Chart(ctx, {
-      type: "line",
-      data: {
-        labels,
-        datasets: [{
-          label: "Basket index (baseline = 100)",
-          data: normalizedSeries,
-          borderColor: "#34d399",
-          backgroundColor: "rgba(52,211,153,0.18)",
-          pointBackgroundColor: "#34d399",
-          pointBorderColor: "#34d399",
-          borderWidth: 2,
-          tension: 0.25,
-          pointRadius: 2,
-          spanGaps: true
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        plugins: { legend: { display: true } },
-        scales: {
-          x: { ticks: { maxTicksLimit: 6 } },
-          y: {
-            title: { display: true, text: "Index (baseline = 100)" },
-            beginAtZero: false
-          }
-        }
-      }
-    });
   }
 
   function buildBasketContributionChart(hist, itemHistories, baselineTs, scopeLabel){
