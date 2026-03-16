@@ -641,6 +641,8 @@
         <div class="row" style="justify-content:space-between;">
           <h3 style="margin:0;" id="itemTitle">Item history</h3>
           <div class="row">
+            <span class="filter-label">Chart unit</span>
+            <div class="toggle-group" id="itemChartUnitToggle"></div>
             <span class="filter-label">Show</span>
             <select id="itemViewMode">
               <option value="selected">Selected only</option>
@@ -688,6 +690,7 @@
   let latest = null;
   let activeItemId = null;
   let itemViewMode = "selected";
+  let itemChartUnit = "usd";
   let commodityMode = "grocery";
   let showItemGroceryTerms = false;
   let referenceHistory = {
@@ -1053,8 +1056,27 @@
       selectedChartNote.textContent = "";
       return;
     }
-    const cfg = getCommodityConfig();
-    selectedChartNote.textContent = `This chart tracks the selected item's price over time in ${cfg.label} (${cfg.unitLabel}). Each point is a recorded snapshot; gaps indicate missing or filtered snapshots.`;
+    const unitLabel = itemChartUnit === "btc" ? "BTC" : "USD";
+    selectedChartNote.textContent = `This chart tracks the selected item's price over time in ${unitLabel}. Each point is a recorded snapshot; gaps indicate missing or filtered snapshots.`;
+  }
+
+  function renderItemChartUnitToggle(){
+    const wrap = $("itemChartUnitToggle");
+    if (!wrap) return;
+    const options = [
+      { id: "btc", label: "BTC" },
+      { id: "usd", label: "USD" }
+    ];
+    wrap.innerHTML = options.map(opt => (
+      `<button type="button" class="toggle-btn${itemChartUnit === opt.id ? ' active' : ''}" data-unit="${opt.id}">${opt.label}</button>`
+    )).join("");
+    wrap.querySelectorAll("button[data-unit]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        itemChartUnit = btn.dataset.unit === "btc" ? "btc" : "usd";
+        renderItemChartUnitToggle();
+        renderItemHistoryWithProgress();
+      });
+    });
   }
 
   function renderCommodityToggle(){
@@ -1486,15 +1508,21 @@
 
   function buildItemChart(canvas, hist, description = ""){
     const labels = hist.map(p => new Date(p.ts).toLocaleString());
-    const commoditySeries = hist.map(p => getCommodityValue(normalizeUsdForHistory(description, p.usd), Number(p.sats), p.ts));
-    const cfg = getCommodityConfig();
+    const unitLabel = itemChartUnit === "btc" ? "BTC" : "USD";
+    const commoditySeries = hist.map(p => {
+      const sats = Number(p.sats);
+      const usd = normalizeUsdForHistory(description, p.usd);
+      return itemChartUnit === "btc"
+        ? (isFinite(sats) ? sats / 100000000 : NaN)
+        : usd;
+    });
 
     const chart = new Chart(canvas.getContext("2d"), {
       type: "line",
       data: {
         labels,
         datasets: [{
-          label: `${cfg.label} (${cfg.unitLabel})`,
+          label: `${unitLabel} price`,
           data: commoditySeries,
           borderColor: "#7dd3fc",
           backgroundColor: "rgba(125,211,252,0.15)",
@@ -1515,7 +1543,7 @@
           y: {
             title: {
               display: true,
-              text: cfg.unitLabel
+              text: unitLabel
             }
           }
         }
@@ -1538,15 +1566,17 @@
     const sortedTs = Array.from(timestamps).sort((a, b) => new Date(a) - new Date(b));
     const labels = sortedTs.map(ts => new Date(ts).toLocaleString());
 
-    const cfg = getCommodityConfig();
-    const isElectricityMode = cfg.id === "mwh";
-    const chartUnitLabel = isElectricityMode ? "1 kWh electricity" : cfg.unitLabel;
+    const chartUnitLabel = itemChartUnit === "btc" ? "BTC" : "USD";
     const datasets = allHistories.map((item, idx) => {
       const color = palette[idx % palette.length];
       const map = new Map((item.history || []).map(point => [
         point.ts,
         (() => {
-          return getCommodityValue(normalizeUsdForHistory(item.description, point.usd), Number(point.sats), point.ts);
+          const sats = Number(point.sats);
+          const usd = normalizeUsdForHistory(item.description, point.usd);
+          return itemChartUnit === "btc"
+            ? (isFinite(sats) ? sats / 100000000 : NaN)
+            : usd;
         })()
       ]));
       return {
@@ -1563,7 +1593,7 @@
       };
     });
 
-    const canvas = createChartSection("All item history", true);
+    const canvas = createChartSection(`All item history (${chartUnitLabel})`, true);
     const chart = new Chart(canvas.getContext("2d"), {
       type: "line",
       data: { labels, datasets },
@@ -2994,6 +3024,7 @@ ${lines.join("\n")}`;
   $("btnFetch")?.addEventListener("click", fetchLatest);
   $("btnRecord")?.addEventListener("click", recordSnapshot);
   $("btnBasket")?.addEventListener("click", renderBasket);
+  renderItemChartUnitToggle();
   $("itemViewMode").addEventListener("change", renderItemHistoryWithProgress);
   $("itemGroceryTermsToggle")?.addEventListener("change", (event) => {
     showItemGroceryTerms = Boolean(event?.target?.checked);
