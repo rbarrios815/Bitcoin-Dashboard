@@ -92,10 +92,21 @@ function isFixedBasketItemId_(itemId) {
   return Boolean(FIXED_BASKET_ITEMS_[id]);
 }
 
+function getTrackedQuantityMeta_(itemId) {
+  const id = String(itemId || '').trim().toLowerCase();
+  const map = {
+    gold: { quantity: 0.1, unit: 'gram' },
+    silver: { quantity: 1, unit: 'gram' },
+    mwh: { quantity: 5, unit: 'kWh' },
+    cash10: { quantity: 10, unit: 'USD' },
+    sats10000: { quantity: 10000, unit: 'sats' }
+  };
+  return map[id] || { quantity: 1, unit: 'item' };
+}
+
 function computeWeightedBasketIndex_(items) {
   let weightedUsdTotal = 0;
   let weightedSatsTotal = 0;
-  let weightTotal = 0;
 
   (items || []).forEach(item => {
     const usd = Number(item && item.usd);
@@ -104,12 +115,11 @@ function computeWeightedBasketIndex_(items) {
     if (!isFinite(usd) || !isFinite(sats) || !isFinite(weight) || weight <= 0) return;
     weightedUsdTotal += usd * weight;
     weightedSatsTotal += sats * weight;
-    weightTotal += weight;
   });
 
   return {
-    usd: weightTotal ? (weightedUsdTotal / weightTotal) : NaN,
-    sats: weightTotal ? (weightedSatsTotal / weightTotal) : NaN
+    usd: weightedUsdTotal,
+    sats: weightedSatsTotal
   };
 }
 
@@ -162,9 +172,12 @@ function fetchLatestSnapshot() {
         name: it.name,
         query: it.query,
         item_description: applyItemDescription_(it.name, null, null),
+        source_item_description: '',
         ts: snapshotTs,
         usd: fixed ? fixed.usd : 0,
         sats: fixed ? fixed.sats : 0,
+        tracked_quantity: getTrackedQuantityMeta_(it.id).quantity,
+        tracked_unit: getTrackedQuantityMeta_(it.id).unit,
         source_url: '',
         price_source: 'fixed',
         price_vendor: '',
@@ -181,9 +194,12 @@ function fetchLatestSnapshot() {
         name: it.name,
         query: it.query,
         item_description: description,
+        source_item_description: rr.raw_description || '',
         ts: snapshotTs,
         usd: rr.usd,
         sats: sats,
+        tracked_quantity: getTrackedQuantityMeta_(it.id).quantity,
+        tracked_unit: getTrackedQuantityMeta_(it.id).unit,
         source_url: rr.source_url || '',
         price_source: rr.source,
         price_vendor: rr.vendor || '',
@@ -200,9 +216,12 @@ function fetchLatestSnapshot() {
         name: it.name,
         query: it.query,
         item_description: description,
+        source_item_description: sr.raw_description || '',
         ts: snapshotTs,
         usd: sr.usd,
         sats: sats,
+        tracked_quantity: getTrackedQuantityMeta_(it.id).quantity,
+        tracked_unit: getTrackedQuantityMeta_(it.id).unit,
         source_url: sr.source_url || '',
         price_source: sr.source,
         price_vendor: sr.vendor || '',
@@ -220,9 +239,12 @@ function fetchLatestSnapshot() {
           name: it.name,
           query: it.query,
           item_description: description,
+          source_item_description: '',
           ts: snapshotTs,
           usd: last,
           sats: sats,
+          tracked_quantity: getTrackedQuantityMeta_(it.id).quantity,
+          tracked_unit: getTrackedQuantityMeta_(it.id).unit,
           source_url: '',
           price_source: 'last_known',
           price_vendor: '',
@@ -236,9 +258,12 @@ function fetchLatestSnapshot() {
       name: it.name,
       query: it.query,
       item_description: applyItemDescription_(it.name, null, null),
+      source_item_description: '',
       ts: snapshotTs,
       usd: 0,
       sats: 0,
+      tracked_quantity: getTrackedQuantityMeta_(it.id).quantity,
+      tracked_unit: getTrackedQuantityMeta_(it.id).unit,
       source_url: '',
       price_source: (rr && rr.error) ? ('error:' + rr.error) : 'error',
       price_vendor: '',
@@ -355,8 +380,11 @@ function getLatestSnapshotFromSheet() {
         name: it.name,
         query: it.query,
         item_description: applyItemDescription_(it.name, null, null),
+        source_item_description: '',
         usd: isFixedBasketItemId_(it.id) ? (getFixedBasketValue_(it.id, fallbackBtcUsd) || { usd: 0 }).usd : 0,
         sats: isFixedBasketItemId_(it.id) ? (getFixedBasketValue_(it.id, fallbackBtcUsd) || { sats: 0 }).sats : 0,
+        tracked_quantity: getTrackedQuantityMeta_(it.id).quantity,
+        tracked_unit: getTrackedQuantityMeta_(it.id).unit,
         source_url: '',
         price_source: isFixedBasketItemId_(it.id) ? 'fixed' : '',
         price_vendor: '',
@@ -480,9 +508,12 @@ function getLatestSnapshotFromSheet() {
         name: it.name,
         query: it.query,
         item_description: description,
+        source_item_description: '',
         ts: latestTs ? latestTs.toISOString() : null,
         usd: fixed ? fixed.usd : 0,
         sats: fixed ? fixed.sats : 0,
+        tracked_quantity: getTrackedQuantityMeta_(it.id).quantity,
+        tracked_unit: getTrackedQuantityMeta_(it.id).unit,
         source_url: '',
         price_source: 'fixed',
         price_vendor: '',
@@ -500,9 +531,12 @@ function getLatestSnapshotFromSheet() {
       name: it.name,
       query: it.query,
       item_description: description,
+      source_item_description: '',
       ts: latestRow ? new Date(latestRow.ts).toISOString() : null,
       usd: latestRow ? latestRow.usd : 0,
       sats: latestRow ? latestRow.sats : 0,
+      tracked_quantity: getTrackedQuantityMeta_(it.id).quantity,
+      tracked_unit: getTrackedQuantityMeta_(it.id).unit,
       source_url: latestRow ? latestRow.source_url : '',
       price_source: latestRow ? latestRow.price_source : '',
       price_vendor: latestRow ? latestRow.price_vendor : '',
@@ -1169,6 +1203,7 @@ function fetchItemsUsdRapidApiBatch_(items, props) {
         byId[it.id] = {
           usd: price,
           description: description,
+          raw_description: extractedDescription || '',
           source_url: extractedSourceUrl,
           vendor: extractedVendor,
           source: 'rapidapi'
@@ -1282,7 +1317,14 @@ function fetchItemsUsdSerpApiBatch_(items, props) {
           }),
           ttl
         );
-        byId[it.id] = { usd: price, description: description, source_url: sourceUrl, vendor: vendor, source: 'serpapi' };
+        byId[it.id] = {
+          usd: price,
+          description: description,
+          raw_description: String((serpResultForDescription && (serpResultForDescription.title || serpResultForDescription.snippet)) || '').trim(),
+          source_url: sourceUrl,
+          vendor: vendor,
+          source: 'serpapi'
+        };
       } else {
         byId[it.id] = { error: 'serpapi_bad_price', source: 'serpapi' };
       }
