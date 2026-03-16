@@ -315,7 +315,9 @@ function recordSnapshot() {
   const snap = fetchLatestSnapshot();
   const ts = new Date(snap.ts);
 
-  const rows = snap.items.map(it => ([
+  const rows = snap.items
+    .filter(it => !isFixedBasketItemId_(it.id))
+    .map(it => ([
     ts,                    // timestamp
     snap.btcUsd,           // btc_usd
     it.id,                 // item_id
@@ -690,10 +692,21 @@ function getAllItemHistories(itemDescriptions) {
   fixedTargets.forEach(fixed => {
     if (!targetSet[fixed.normalized]) return;
     if (!outByNormalized[fixed.normalized]) outByNormalized[fixed.normalized] = { description: fixed.label, history: [] };
-    if (!(outByNormalized[fixed.normalized].history || []).length) {
-      outByNormalized[fixed.normalized].history = buildFixedItemHistoryFromSheet_(sheet, fixed.id, idx);
-      if (!outByNormalized[fixed.normalized].description) outByNormalized[fixed.normalized].description = fixed.label;
-    }
+    const existing = outByNormalized[fixed.normalized].history || [];
+    const generated = buildFixedItemHistoryFromSheet_(sheet, fixed.id, idx);
+    const mergedByTs = {};
+    existing.forEach(point => {
+      if (!point || !point.ts) return;
+      mergedByTs[point.ts] = point;
+    });
+    generated.forEach(point => {
+      if (!point || !point.ts) return;
+      mergedByTs[point.ts] = point;
+    });
+    outByNormalized[fixed.normalized].history = Object.keys(mergedByTs)
+      .sort((a, b) => new Date(a) - new Date(b))
+      .map(ts => mergedByTs[ts]);
+    if (!outByNormalized[fixed.normalized].description) outByNormalized[fixed.normalized].description = fixed.label;
   });
 
   const out = Object.keys(outByNormalized).map(key => {
@@ -732,6 +745,28 @@ function getBasketHistory() {
       btcUsd: Number(row[idx.btc_usd])
     });
   }
+
+  Object.keys(snapshots).forEach(ts => {
+    const rows = snapshots[ts] || [];
+    const hasById = {};
+    rows.forEach(row => {
+      const id = String(row.id || '').trim().toLowerCase();
+      if (id) hasById[id] = true;
+    });
+    const btcValues = rows.map(item => Number(item.btcUsd)).filter(isFinite);
+    const btcUsd = btcValues.length ? average_(btcValues) : NaN;
+    ['cash10', 'sats10000'].forEach(id => {
+      if (hasById[id]) return;
+      const fixed = getFixedBasketValue_(id, btcUsd);
+      if (!fixed) return;
+      rows.push({
+        id: id,
+        usd: fixed.usd,
+        sats: fixed.sats,
+        btcUsd: btcUsd
+      });
+    });
+  });
 
   const out = Object.keys(snapshots).map(ts => {
     const rows = snapshots[ts];
@@ -887,56 +922,60 @@ function getPurchasingPowerDashboardData() {
   snapshotKeys.forEach(tsIso => {
     const snapshot = snapshotsByTs[tsIso];
     if (!snapshot) return;
-    const hasSats10000 = snapshot.itemRows.some(row => String(row.itemId || '').trim().toLowerCase() === 'sats10000');
-    if (hasSats10000) return;
-
     const btcUsd = isFinite(snapshot.btcUsd)
       ? snapshot.btcUsd
       : average_(snapshot.itemRows.map(row => row.btcUsd));
     if (!isFinite(btcUsd) || btcUsd <= 0) return;
 
-    const fixed = getFixedBasketValue_('sats10000', btcUsd);
-    if (!fixed || !isFinite(fixed.usd) || !isFinite(fixed.sats)) return;
+    const fixedRows = [
+      { id: 'cash10', name: '$10', description: '$10' },
+      { id: 'sats10000', name: '10,000 Satoshis', description: '10,000 satoshis' }
+    ];
+    fixedRows.forEach(fixedMeta => {
+      const hasFixed = snapshot.itemRows.some(row => String(row.itemId || '').trim().toLowerCase() === fixedMeta.id);
+      if (hasFixed) return;
 
-    const key = normalizeDescription_('10,000 satoshis');
-    const row = {
-      itemKey: key,
-      itemId: 'sats10000',
-      itemName: '10,000 Satoshis',
-      description: '10,000 satoshis',
-      usd: fixed.usd,
-      sats: fixed.sats,
-      btcUsd: btcUsd,
-      vendor: '',
-      source: 'fixed',
-      group: '',
-      is_stale: false
-    };
+      const fixed = getFixedBasketValue_(fixedMeta.id, btcUsd);
+      if (!fixed || !isFinite(fixed.usd) || !isFinite(fixed.sats)) return;
 
-    snapshot.itemRows.push(row);
+      const key = normalizeDescription_(fixedMeta.description);
+      snapshot.itemRows.push({
+        itemKey: key,
+        itemId: fixedMeta.id,
+        itemName: fixedMeta.name,
+        description: fixedMeta.description,
+        usd: fixed.usd,
+        sats: fixed.sats,
+        btcUsd: btcUsd,
+        vendor: '',
+        source: 'fixed',
+        group: '',
+        is_stale: false
+      });
 
-    if (!itemHistoryByKey[key]) {
-      itemHistoryByKey[key] = {
-        key: key,
-        itemId: 'sats10000',
-        itemName: '10,000 Satoshis',
-        description: '10,000 satoshis',
-        history: []
-      };
-    }
+      if (!itemHistoryByKey[key]) {
+        itemHistoryByKey[key] = {
+          key: key,
+          itemId: fixedMeta.id,
+          itemName: fixedMeta.name,
+          description: fixedMeta.description,
+          history: []
+        };
+      }
 
-    itemHistoryByKey[key].history.push({
-      ts: tsIso,
-      usd: fixed.usd,
-      sats: fixed.sats,
-      btcUsd: btcUsd,
-      vendor: '',
-      source: 'fixed',
-      group: '',
-      is_stale: false
+      itemHistoryByKey[key].history.push({
+        ts: tsIso,
+        usd: fixed.usd,
+        sats: fixed.sats,
+        btcUsd: btcUsd,
+        vendor: '',
+        source: 'fixed',
+        group: '',
+        is_stale: false
+      });
+
+      if (!vendorSetByItem[key]) vendorSetByItem[key] = {};
     });
-
-    if (!vendorSetByItem[key]) vendorSetByItem[key] = {};
   });
 
   const snapshots = snapshotKeys.map(tsIso => {
