@@ -560,6 +560,27 @@
         <div class="note" id="ppAttribution"></div>
       </div>
 
+      <!-- Package 1: Work-hours affordability -->
+      <div class="row" style="justify-content:space-between; align-items:center; margin-top:12px; flex-wrap:wrap; gap:8px;">
+        <div class="chart-title" style="margin:0;">WORK-HOURS AFFORDABILITY INDEX</div>
+        <div class="row" style="gap:8px; flex-wrap:wrap;">
+          <label class="filter-label" for="ppHourlyWage">Hourly wage (USD)</label>
+          <input id="ppHourlyWage" type="number" min="1" step="0.5" value="25" style="width:90px;" />
+        </div>
+      </div>
+      <div class="chartBox"><canvas id="ppAffordabilityChart"></canvas></div>
+      <div class="note" id="ppAffordabilityNote"></div>
+
+      <!-- Package 2: Scarcity share of capped BTC supply -->
+      <div class="chart-title" style="margin-top:12px;">SCARCITY SHARE OF 21M BTC SUPPLY</div>
+      <div class="chartBox"><canvas id="ppScarcityChart"></canvas></div>
+      <div class="note" id="ppScarcityNote"></div>
+
+      <!-- Package 3: Sats change decomposition chart -->
+      <div class="chart-title" style="margin-top:12px;">SATS CHANGE DECOMPOSITION (USD VS BTC EFFECT)</div>
+      <div class="chartBox"><canvas id="ppDecompositionChart"></canvas></div>
+      <div class="note" id="ppDecompositionNote"></div>
+
       <div class="chart-title" style="margin-top:12px;">Winners / losers in bitcoin terms</div>
       <div class="basket-stats" id="ppWinnersLosers"></div>
 
@@ -713,7 +734,17 @@
   let ppSatsChart = null;
   let ppContributionChart = null;
   let ppCorrelationChart = null;
+  let ppAffordabilityChart = null;
+  let ppScarcityChart = null;
+  let ppDecompositionChart = null;
   let ppSeriesUnit = "both";
+
+  const PURCHASING_PACKAGES = {
+    affordabilityHours: true,
+    scarcityShare: true,
+    satsDecomposition: true
+  };
+  const MAX_BTC_SUPPLY = 21000000;
 
   const FETCH_AVG_KEY = "btc_dashboard_fetch_avg_ms";
   const FETCH_MIN_MS = 2000;
@@ -2529,9 +2560,108 @@ ${itemLines}`;
     renderCorrelationChart(filtered);
     renderMarketCommentary(filtered, view);
     renderPurchasingAttribution(filtered);
+    renderPackageAffordabilityHours(filtered);
+    renderPackageScarcityShare(filtered);
+    renderPackageSatsDecomposition(filtered);
     renderPurchasingItems(filtered, view);
     renderPurchasingWinners(filtered, view);
     renderPurchasingQuality(filtered);
+  }
+
+  // Package 1: Work-hours affordability
+  function renderPackageAffordabilityHours(snapshots){
+    const note = $("ppAffordabilityNote");
+    const canvas = $("ppAffordabilityChart");
+    if (!PURCHASING_PACKAGES.affordabilityHours || !canvas) return;
+
+    const wage = Math.max(1, Number($("ppHourlyWage")?.value) || 25);
+    const labels = snapshots.map(s => fmtDate(s.ts));
+    const usdHours = snapshots.map(s => isFinite(s.basketUsd) ? Number(s.basketUsd) / wage : null);
+    const satsHours = snapshots.map(s => {
+      const btcUsd = Number(s.btcUsd);
+      if (!isFinite(s.basketSats) || !isFinite(btcUsd) || btcUsd <= 0) return null;
+      const hourlyWageSats = (wage / btcUsd) * 100000000;
+      return hourlyWageSats > 0 ? Number(s.basketSats) / hourlyWageSats : null;
+    });
+
+    ppAffordabilityChart = destroyChartSafe(ppAffordabilityChart);
+    ppAffordabilityChart = new Chart(canvas.getContext("2d"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          { label: "Hours needed (USD basket)", data: usdHours, borderColor: "#f59e0b", tension: .25, spanGaps: true },
+          { label: "Hours needed (sats basket)", data: satsHours, borderColor: "#22c55e", tension: .25, spanGaps: true }
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false, animation: false }
+    });
+    if (note) note.textContent = `Assuming $${wage.toFixed(2)}/hour, this shows labor hours needed to buy the basket in USD and sats terms (lower is better).`;
+  }
+
+  // Package 2: Scarcity share of capped BTC supply
+  function renderPackageScarcityShare(snapshots){
+    const note = $("ppScarcityNote");
+    const canvas = $("ppScarcityChart");
+    if (!PURCHASING_PACKAGES.scarcityShare || !canvas) return;
+
+    const labels = snapshots.map(s => fmtDate(s.ts));
+    const ppmSeries = snapshots.map(s => {
+      const sats = Number(s.basketSats);
+      if (!isFinite(sats)) return null;
+      const basketBtc = sats / 100000000;
+      return (basketBtc / MAX_BTC_SUPPLY) * 1000000;
+    });
+
+    ppScarcityChart = destroyChartSafe(ppScarcityChart);
+    ppScarcityChart = new Chart(canvas.getContext("2d"), {
+      type: "line",
+      data: { labels, datasets: [{ label: "Basket share of max supply (ppm)", data: ppmSeries, borderColor: "#a78bfa", tension: .25, spanGaps: true }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        scales: { y: { ticks: { callback: (v) => `${Number(v).toFixed(4)} ppm` } } }
+      }
+    });
+
+    const latestPpm = ppmSeries.length ? ppmSeries[ppmSeries.length - 1] : null;
+    if (note) note.textContent = `Tracks basket cost as a fraction of Bitcoin's capped 21M supply. Latest reading: ${isFinite(latestPpm) ? latestPpm.toFixed(6) : "—"} ppm.`;
+  }
+
+  // Package 3: Sats decomposition (USD effect vs BTC effect)
+  function renderPackageSatsDecomposition(snapshots){
+    const note = $("ppDecompositionNote");
+    const canvas = $("ppDecompositionChart");
+    if (!PURCHASING_PACKAGES.satsDecomposition || !canvas) return;
+
+    const { first, last } = getBoundarySnapshots(snapshots);
+    ppDecompositionChart = destroyChartSafe(ppDecompositionChart);
+    if (!first || !last || !isFinite(first.basketSats) || first.basketSats <= 0) {
+      if (note) note.textContent = "Not enough data to decompose sats changes for this range.";
+      return;
+    }
+
+    const usdFactor = isFinite(first.basketUsd) && first.basketUsd > 0 ? Number(last.basketUsd) / Number(first.basketUsd) : NaN;
+    const impliedAfterUsd = isFinite(usdFactor) ? Number(first.basketSats) * usdFactor : NaN;
+    const start = Number(first.basketSats);
+    const end = Number(last.basketSats);
+    const usdEffect = isFinite(impliedAfterUsd) ? impliedAfterUsd - start : NaN;
+    const btcEffect = isFinite(impliedAfterUsd) ? end - impliedAfterUsd : NaN;
+
+    ppDecompositionChart = new Chart(canvas.getContext("2d"), {
+      type: "bar",
+      data: {
+        labels: ["Start sats", "USD effect", "BTC effect", "End sats"],
+        datasets: [{
+          label: "Sats contribution",
+          data: [start, usdEffect, btcEffect, end],
+          backgroundColor: ["rgba(148,163,184,.6)", "rgba(251,146,60,.7)", "rgba(34,197,94,.7)", "rgba(148,163,184,.85)"]
+        }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, animation: false }
+    });
+    if (note) note.textContent = "USD effect estimates how much sats would change if only basket USD prices moved. BTC effect is the remaining gap to the observed end sats.";
   }
 
   function buildPurchasingBasketTooltip(label, snapshot){
@@ -3083,6 +3213,7 @@ ${lines.join("\n")}`;
   $("ppItemSelect").addEventListener("change", renderPurchasingPowerDashboard);
   $("ppGroupSelect").addEventListener("change", renderPurchasingPowerDashboard);
   $("ppContributionScope")?.addEventListener("change", renderPurchasingPowerDashboard);
+  $("ppHourlyWage")?.addEventListener("input", renderPurchasingPowerDashboard);
   setupNoteToggle("ppAttributionToggle", "ppAttributionWrap");
   setupNoteToggle("basketExplanationToggle", "basketExplanationWrap");
   setupHoverTooltipForContainer("basketStats");
