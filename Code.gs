@@ -324,6 +324,7 @@ function recordSnapshot() {
     it.name,               // item_name
     it.query,              // query
     it.item_description,   // item_description
+    it.source_item_description || '', // source_item_description
     it.usd,                // usd
     it.sats,               // sats
     snap.basketIndexUsd,   // basket_index_usd
@@ -440,6 +441,7 @@ function getLatestSnapshotFromSheet() {
       item_id: rowItemId,
       item_name: rowItemName,
       item_description: desc,
+      source_item_description: idx.source_item_description != null ? String(row[idx.source_item_description] || '') : '',
       usd: convertElectricityUsdToKwh_(row[idx.usd], rowItemId, rowItemName, desc),
       sats: Number(row[idx.sats]),
       price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
@@ -510,7 +512,7 @@ function getLatestSnapshotFromSheet() {
         name: it.name,
         query: it.query,
         item_description: description,
-        source_item_description: '',
+        source_item_description: latestRow ? latestRow.source_item_description : '',
         ts: latestTs ? latestTs.toISOString() : null,
         usd: fixed ? fixed.usd : 0,
         sats: fixed ? fixed.sats : 0,
@@ -533,7 +535,7 @@ function getLatestSnapshotFromSheet() {
       name: it.name,
       query: it.query,
       item_description: description,
-      source_item_description: '',
+      source_item_description: latestRow ? latestRow.source_item_description : '',
       ts: latestRow ? new Date(latestRow.ts).toISOString() : null,
       usd: latestRow ? latestRow.usd : 0,
       sats: latestRow ? latestRow.sats : 0,
@@ -624,6 +626,7 @@ function getItemHistory(itemDescription) {
     if (normalizeDescription_(rowDescription) !== targetNormalized) continue;
     out.push({
       ts: new Date(row[idx.timestamp]).toISOString(),
+      source_item_description: idx.source_item_description != null ? String(row[idx.source_item_description] || '') : '',
       usd: convertElectricityUsdToKwh_(row[idx.usd], idx.item_id != null ? row[idx.item_id] : '', idx.item_name != null ? row[idx.item_name] : '', rowDescription),
       sats: Number(row[idx.sats]),
       btcUsd: Number(row[idx.btc_usd]),
@@ -675,6 +678,7 @@ function getAllItemHistories(itemDescriptions) {
     }
     outByNormalized[normalized].history.push({
       ts: new Date(row[idx.timestamp]).toISOString(),
+      source_item_description: idx.source_item_description != null ? String(row[idx.source_item_description] || '') : '',
       usd: convertElectricityUsdToKwh_(row[idx.usd], idx.item_id != null ? row[idx.item_id] : '', idx.item_name != null ? row[idx.item_name] : '', rowDescription),
       sats: Number(row[idx.sats]),
       btcUsd: Number(row[idx.btc_usd]),
@@ -870,6 +874,7 @@ function getPurchasingPowerDashboardData() {
     const itemId = idx.item_id != null ? String(row[idx.item_id] || '').trim() : '';
     const itemName = idx.item_name != null ? String(row[idx.item_name] || '').trim() : '';
     const description = idx.item_description != null ? String(row[idx.item_description] || '').trim() : '';
+    const sourceItemDescription = idx.source_item_description != null ? String(row[idx.source_item_description] || '').trim() : '';
     const source = idx.price_source != null ? String(row[idx.price_source] || '').trim() : '';
     const vendor = idx.price_vendor != null ? String(row[idx.price_vendor] || '').trim() : '';
     const group = idx.group != null ? String(row[idx.group] || '').trim() : '';
@@ -886,6 +891,7 @@ function getPurchasingPowerDashboardData() {
         itemId: itemId || '',
         itemName: itemName || configuredNameById[itemId] || description || itemId || 'Unknown Item',
         description: description || itemName || itemId || 'Unknown Item',
+        source_item_description: sourceItemDescription,
         history: []
       };
     }
@@ -908,6 +914,7 @@ function getPurchasingPowerDashboardData() {
       itemId: itemId,
       itemName: itemName || description || itemId || 'Unknown Item',
       description: description || itemName || itemId || 'Unknown Item',
+      source_item_description: sourceItemDescription,
       usd: usd,
       sats: sats,
       btcUsd: btcUsd,
@@ -1037,6 +1044,7 @@ function getPurchasingPowerDashboardData() {
       timestamp: idx.timestamp != null,
       item_name: idx.item_name != null,
       item_description: idx.item_description != null,
+      source_item_description: idx.source_item_description != null,
       price_vendor: idx.price_vendor != null,
       usd: idx.usd != null,
       btc_usd: idx.btc_usd != null,
@@ -1056,6 +1064,7 @@ function buildDashboardHeaderIndex_(headerRow) {
     item_id: findHeaderIndex_(headerRow, ['item_id', 'item id', 'id']),
     item_name: findHeaderIndex_(headerRow, ['item_name', 'item name', 'name']),
     item_description: findHeaderIndex_(headerRow, ['item_description', 'item description', 'description']),
+    source_item_description: findHeaderIndex_(headerRow, ['source_item_description', 'source item description', 'raw_description', 'product_description']),
     usd: findHeaderIndex_(headerRow, ['usd', 'price_usd', 'usd_price', 'price']),
     sats: findHeaderIndex_(headerRow, ['sats', 'satoshis', 'sats_price']),
     basket_index_usd: findHeaderIndex_(headerRow, ['basket_index_usd', 'basket usd', 'basket_total_usd', 'basket_usd']),
@@ -1506,14 +1515,14 @@ function getVendorCountsByDescriptions_(descriptions, sheet) {
 /**
  * Find the last known USD for an item description by searching upward. Used when providers are down.
  * Assumes your history sheet schema where:
- *   item_description is column 6, usd is column 7 (1-indexed)
+ *   item_description is column 6, usd is column 8 (1-indexed)
  */
 function getLastKnownUsd_(itemId, sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return null;
 
   const ITEM_DESCRIPTION_COL = 6;
-  const USD_COL = 7;
+  const USD_COL = 8;
 
   const chunkSize = 200;
   for (let end = lastRow; end >= 2; end -= chunkSize) {
@@ -1587,7 +1596,7 @@ function getOrCreateHistorySheet_(ss, name) {
   if (!sh) sh = ss.insertSheet(name);
 
   const desiredHeader = [
-    'timestamp', 'btc_usd', 'item_id', 'item_name', 'query', 'item_description', 'usd', 'sats',
+    'timestamp', 'btc_usd', 'item_id', 'item_name', 'query', 'item_description', 'source_item_description', 'usd', 'sats',
     'basket_index_usd', 'basket_index_sats', 'price_source', 'price_vendor', 'source_url', 'is_stale'
   ];
 
@@ -1630,6 +1639,7 @@ function headerIndex_(headerRow) {
     item_name: m.item_name,
     query: m.query,
     item_description: m.item_description,
+    source_item_description: m.source_item_description !== undefined ? m.source_item_description : null,
     usd: m.usd,
     sats: m.sats,
     basket_index_usd: m.basket_index_usd,
