@@ -104,24 +104,98 @@ function getTrackedQuantityMeta_(itemId) {
 }
 
 function computeWeightedBasketIndex_(items) {
+  // Canonical basket cost is always the weighted average cost of the included basket items.
   let weightedUsdTotal = 0;
   let weightedSatsTotal = 0;
+  let totalWeight = 0;
 
   (items || []).forEach(item => {
+    const itemId = item && item.id;
     const usd = Number(item && item.usd);
     const sats = Number(item && item.sats);
-    const weight = basketWeightForItemId_(item && item.id);
+    const weight = Number(item && item.weight);
     const valid = String(item && item.validation_status || '').toLowerCase();
-    if (valid && valid !== 'validated' && !isFixedBasketItemId_(item && item.id)) return;
+    if (valid && valid !== 'validated' && !isFixedBasketItemId_(itemId)) return;
     if (!isFinite(usd) || !isFinite(sats) || !isFinite(weight) || weight <= 0) return;
     weightedUsdTotal += usd * weight;
     weightedSatsTotal += sats * weight;
+    totalWeight += weight;
   });
 
   return {
-    usd: weightedUsdTotal,
-    sats: weightedSatsTotal
+    usd: totalWeight > 0 ? weightedUsdTotal / totalWeight : 0,
+    sats: totalWeight > 0 ? weightedSatsTotal / totalWeight : 0,
+    totalWeight: totalWeight
   };
+}
+
+function computeCanonicalBasketForSnapshot_(rows, options) {
+  // Single source of truth: recompute basket cost from row-level data instead of stored basket_index_* sheet fields.
+  const opts = Object.assign({ allowedItemIds: null, injectFixedItems: true, btcUsd: null }, options || {});
+  const allowedLookup = opts.allowedItemIds ? buildItemIdLookup_(opts.allowedItemIds) : null;
+  const includedRows = [];
+  const includedItemIds = [];
+  const seenIds = {};
+  let snapshotBtcUsd = Number(opts.btcUsd);
+
+  (rows || []).forEach(row => {
+    const itemId = String((row && (row.id || row.itemId)) || '').trim().toLowerCase();
+    if (!itemId) return;
+    if (allowedLookup && !allowedLookup[itemId]) return;
+    const btcUsd = Number(row && row.btcUsd);
+    if (!isFinite(snapshotBtcUsd) && isFinite(btcUsd) && btcUsd > 0) snapshotBtcUsd = btcUsd;
+    includedRows.push({
+      id: itemId,
+      usd: Number(row && row.usd),
+      sats: Number(row && row.sats),
+      btcUsd: btcUsd,
+      validation_status: row && row.validation_status,
+      weight: basketWeightForItemId_(itemId)
+    });
+    if (!seenIds[itemId]) {
+      seenIds[itemId] = true;
+      includedItemIds.push(itemId);
+    }
+  });
+
+  if (opts.injectFixedItems) {
+    Object.keys(FIXED_BASKET_ITEMS_).forEach(fixedId => {
+      if (allowedLookup && !allowedLookup[fixedId]) return;
+      if (seenIds[fixedId]) return;
+      const fixed = getFixedBasketValue_(fixedId, snapshotBtcUsd);
+      if (!fixed) return;
+      includedRows.push({
+        id: fixedId,
+        usd: fixed.usd,
+        sats: fixed.sats,
+        btcUsd: snapshotBtcUsd,
+        validation_status: 'validated',
+        weight: basketWeightForItemId_(fixedId)
+      });
+      seenIds[fixedId] = true;
+      includedItemIds.push(fixedId);
+    });
+  }
+
+  const weighted = computeWeightedBasketIndex_(includedRows);
+  return {
+    basketCostUsd: isFinite(weighted.usd) ? weighted.usd : 0,
+    basketCostSats: isFinite(weighted.sats) ? weighted.sats : 0,
+    basketIndexUsd: 0,
+    basketIndexSats: 0,
+    includedItemIds: includedItemIds,
+    includedCount: includedItemIds.length,
+    totalWeight: isFinite(weighted.totalWeight) ? weighted.totalWeight : 0
+  };
+}
+
+function buildItemIdLookup_(itemIds) {
+  const lookup = {};
+  (itemIds || []).forEach(itemId => {
+    const normalized = String(itemId || '').trim().toLowerCase();
+    if (normalized) lookup[normalized] = true;
+  });
+  return lookup;
 }
 
 function fetchLatestSnapshot(options) {
@@ -191,14 +265,16 @@ function fetchLatestSnapshot(options) {
     return Object.assign({}, item, { first_available: firstAvailable, vendor_count: vendorCount });
   });
 
-  const weightedBasket = computeWeightedBasketIndex_(enriched);
+  const weightedBasket = computeCanonicalBasketForSnapshot_(enriched, { btcUsd: btcUsd, injectFixedItems: false });
   const fullOut = {
     ts: snapshotTs,
     btcUsd,
     items: enriched,
     rawOffers,
-    basketIndexUsd: weightedBasket.usd,
-    basketIndexSats: weightedBasket.sats
+    basketCostUsd: weightedBasket.basketCostUsd,
+    basketCostSats: weightedBasket.basketCostSats,
+    basketIndexUsd: weightedBasket.basketCostUsd,
+    basketIndexSats: weightedBasket.basketCostSats
   };
   const compactOut = buildCompactSnapshotForCache_(fullOut);
 
@@ -497,24 +573,37 @@ function getBasketHistory() {
     });
   }
 
-  Object.keys(snapshots).forEach(ts => {
+  const history = Object.keys(snapshots).sort((a,b) => new Date(a) - new Date(b)).map(ts => {
     const rows = snapshots[ts] || [];
-    const hasById = {};
-    rows.forEach(row => { const id = String(row.id || '').trim().toLowerCase(); if (id) hasById[id] = true; });
     const btcUsd = average_(rows.map(item => Number(item.btcUsd)).filter(isFinite));
-    ['cash10', 'sats10000'].forEach(id => {
-      if (hasById[id]) return;
-      const fixed = getFixedBasketValue_(id, btcUsd);
-      if (!fixed) return;
-      rows.push({ id, usd: fixed.usd, sats: fixed.sats, btcUsd, validation_status: 'validated' });
-    });
+    const basket = computeCanonicalBasketForSnapshot_(rows, { btcUsd: btcUsd, injectFixedItems: true });
+    return {
+      ts,
+      btcUsd,
+      basketCostUsd: basket.basketCostUsd,
+      basketCostSats: basket.basketCostSats,
+      basketIndexUsd: 0,
+      basketIndexSats: 0,
+      includedItemIds: basket.includedItemIds,
+      includedCount: basket.includedCount,
+      totalWeight: basket.totalWeight
+    };
   });
 
-  return Object.keys(snapshots).map(ts => {
-    const rows = snapshots[ts];
-    const weighted = computeWeightedBasketIndex_(rows);
-    return { ts, btcUsd: average_(rows.map(item => Number(item.btcUsd)).filter(isFinite)), basketIndexUsd: isFinite(weighted.usd) ? weighted.usd : 0, basketIndexSats: isFinite(weighted.sats) ? weighted.sats : 0 };
-  }).sort((a,b) => new Date(a.ts) - new Date(b.ts));
+  if (!history.length) return history;
+  const baselineUsd = Number(history[0].basketCostUsd);
+  const baselineSats = Number(history[0].basketCostSats);
+  history.forEach((point, idxPoint) => {
+    // Basket index is derived from canonical basket cost with the baseline snapshot normalized to 100.
+    point.basketIndexUsd = idxPoint === 0
+      ? 100
+      : (baselineUsd > 0 ? (Number(point.basketCostUsd) / baselineUsd) * 100 : 0);
+    point.basketIndexSats = idxPoint === 0
+      ? 100
+      : (baselineSats > 0 ? (Number(point.basketCostSats) / baselineSats) * 100 : 0);
+  });
+
+  return history;
 }
 
 function getBasketInflation() {
@@ -556,7 +645,7 @@ function getPurchasingPowerDashboardData() {
     if (!ts) continue;
     const rowIso = ts.toISOString();
     if (!snapshotsByTs[rowIso]) {
-      snapshotsByTs[rowIso] = { ts: rowIso, btcUsd: safeNumber_(idx.btc_usd != null ? row[idx.btc_usd] : null), basketUsd: safeNumber_(idx.basket_index_usd != null ? row[idx.basket_index_usd] : null), basketSats: safeNumber_(idx.basket_index_sats != null ? row[idx.basket_index_sats] : null), itemRows: [] };
+      snapshotsByTs[rowIso] = { ts: rowIso, btcUsd: safeNumber_(idx.btc_usd != null ? row[idx.btc_usd] : null), storedBasketUsd: safeNumber_(idx.basket_index_usd != null ? row[idx.basket_index_usd] : null), storedBasketSats: safeNumber_(idx.basket_index_sats != null ? row[idx.basket_index_sats] : null), itemRows: [] };
     }
     const itemId = idx.item_id != null ? String(row[idx.item_id] || '').trim() : '';
     const itemName = idx.item_name != null ? String(row[idx.item_name] || '').trim() : '';
@@ -565,6 +654,7 @@ function getPurchasingPowerDashboardData() {
     const source = idx.price_source != null ? String(row[idx.price_source] || '').trim() : '';
     const vendor = idx.price_vendor != null ? String(row[idx.price_vendor] || '').trim() : '';
     const group = idx.group != null ? String(row[idx.group] || '').trim() : '';
+    const validationStatus = idx.validation_status != null ? String(row[idx.validation_status] || '').trim() : 'validated';
     const isStale = idx.is_stale != null ? Boolean(row[idx.is_stale]) : /^last_known/i.test(source);
     const usd = deriveUsdValue_(row, idx);
     const btcUsd = safeNumber_(idx.btc_usd != null ? row[idx.btc_usd] : null);
@@ -572,10 +662,10 @@ function getPurchasingPowerDashboardData() {
     const fallbackKey = description || itemName || itemId || `row_${r}`;
     const itemKey = normalizeDescription_(fallbackKey);
     if (!itemHistoryByKey[itemKey]) itemHistoryByKey[itemKey] = { key: itemKey, itemId: itemId || '', itemName: itemName || configuredNameById[itemId] || description || itemId || 'Unknown Item', description: description || itemName || itemId || 'Unknown Item', source_item_description: rawVendorTitle, history: [] };
-    itemHistoryByKey[itemKey].history.push({ ts: rowIso, usd, sats, btcUsd, vendor, source, group, is_stale: isStale });
+    itemHistoryByKey[itemKey].history.push({ ts: rowIso, usd, sats, btcUsd, vendor, source, group, is_stale: isStale, validation_status: validationStatus });
     if (!vendorSetByItem[itemKey]) vendorSetByItem[itemKey] = {};
     if (vendor) vendorSetByItem[itemKey][vendor] = true;
-    snapshotsByTs[rowIso].itemRows.push({ itemKey, itemId, itemName: itemName || description || itemId || 'Unknown Item', description: description || itemName || itemId || 'Unknown Item', source_item_description: rawVendorTitle, usd, sats, btcUsd, vendor, source, group, is_stale: isStale });
+    snapshotsByTs[rowIso].itemRows.push({ itemKey, itemId, itemName: itemName || description || itemId || 'Unknown Item', description: description || itemName || itemId || 'Unknown Item', source_item_description: rawVendorTitle, usd, sats, btcUsd, vendor, source, group, is_stale: isStale, validation_status: validationStatus });
   }
 
   const snapshotKeys = Object.keys(snapshotsByTs).sort((a,b) => new Date(a) - new Date(b));
@@ -598,12 +688,45 @@ function getPurchasingPowerDashboardData() {
   const snapshots = snapshotKeys.map(tsIso => {
     const entry = snapshotsByTs[tsIso];
     const rows = entry.itemRows;
-    const validUsd = rows.map(r => r.usd).filter(isFinite);
-    const validSats = rows.map(r => r.sats).filter(isFinite);
+    const btcUsd = isFinite(entry.btcUsd) ? entry.btcUsd : average_(rows.map(r => r.btcUsd));
+    const basket = computeCanonicalBasketForSnapshot_(rows, { btcUsd: btcUsd, injectFixedItems: true });
     const staleCount = rows.filter(r => r.is_stale).length;
     const missingCount = rows.filter(r => !isFinite(r.usd) || !isFinite(r.sats)).length;
-    return { ts: tsIso, btcUsd: isFinite(entry.btcUsd) ? entry.btcUsd : average_(rows.map(r => r.btcUsd)), basketUsd: isFinite(entry.basketUsd) ? entry.basketUsd : average_(validUsd), basketSats: isFinite(entry.basketSats) ? entry.basketSats : average_(validSats), itemCount: rows.length, staleCount, missingCount, groups: uniqueValues_(rows.map(r => r.group)), items: rows };
+    return {
+      ts: tsIso,
+      btcUsd: btcUsd,
+      basketUsd: basket.basketCostUsd,
+      basketSats: basket.basketCostSats,
+      basketCostUsd: basket.basketCostUsd,
+      basketCostSats: basket.basketCostSats,
+      basketIndexUsd: 0,
+      basketIndexSats: 0,
+      basketIncludedItemIds: basket.includedItemIds,
+      basketIncludedCount: basket.includedCount,
+      basketTotalWeight: basket.totalWeight,
+      storedBasketUsd: entry.storedBasketUsd,
+      storedBasketSats: entry.storedBasketSats,
+      itemCount: rows.length,
+      staleCount,
+      missingCount,
+      groups: uniqueValues_(rows.map(r => r.group)),
+      items: rows
+    };
   });
+
+  if (snapshots.length) {
+    // Stored basket_index_* columns are audit/cache fields only; rendering recomputes canonical basket cost and normalizes from the first snapshot.
+    const baselineUsd = Number(snapshots[0].basketCostUsd);
+    const baselineSats = Number(snapshots[0].basketCostSats);
+    snapshots.forEach((snapshot, index) => {
+      snapshot.basketIndexUsd = index === 0
+        ? 100
+        : (baselineUsd > 0 ? (Number(snapshot.basketCostUsd) / baselineUsd) * 100 : 0);
+      snapshot.basketIndexSats = index === 0
+        ? 100
+        : (baselineSats > 0 ? (Number(snapshot.basketCostSats) / baselineSats) * 100 : 0);
+    });
+  }
 
   const itemList = Object.keys(itemHistoryByKey).map(key => {
     const entry = itemHistoryByKey[key];
