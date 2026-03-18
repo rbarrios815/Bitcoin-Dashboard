@@ -562,7 +562,7 @@
 
       <!-- Package 1: Work-hours affordability -->
       <div class="row" style="justify-content:space-between; align-items:center; margin-top:12px; flex-wrap:wrap; gap:8px;">
-        <div class="chart-title" style="margin:0;">WORK-HOURS AFFORDABILITY INDEX</div>
+        <div class="chart-title" style="margin:0;">HOURS OF WORK REQUIRED</div>
         <div class="row" style="gap:8px; flex-wrap:wrap;">
           <label class="filter-label" for="ppHourlyWage">Hourly wage (USD)</label>
           <input id="ppHourlyWage" type="number" min="1" step="0.5" value="25" style="width:90px;" />
@@ -648,7 +648,7 @@
           <h3 style="margin:0;">Items (click one)</h3>
           <label class="switch-row" for="itemGroceryTermsToggle">
             <input type="checkbox" id="itemGroceryTermsToggle" />
-            Show values in grocery-item terms
+            Show values in item-quantity terms
           </label>
         </div>
         <div class="items" id="items"></div>
@@ -737,7 +737,7 @@
   let ppAffordabilityChart = null;
   let ppScarcityChart = null;
   let ppDecompositionChart = null;
-  let ppSeriesUnit = "both";
+  let ppSeriesUnit = "usd";
 
   const PURCHASING_PACKAGES = {
     affordabilityHours: true,
@@ -1838,7 +1838,7 @@
     const chartModes = COMMODITIES.filter(mode => mode.id !== "dollars");
     const datasets = chartModes.map(mode => {
       const color = commodityColors[mode.id] || "#7dd3fc";
-      const label = mode.id === "grocery" ? "Basket (Grocery Items / Dollars)" : `Basket (${mode.label})`;
+      const label = mode.id === "grocery" ? "Basket (Dollars)" : `Basket (${mode.label})`;
       const series = hist.map((point, idx) => {
         const usd = usdSeries[idx];
         const sats = satsSeries[idx];
@@ -2322,9 +2322,9 @@ ${itemLines}`;
     const wrap = $("ppSeriesUnitToggle");
     if (!wrap) return;
     const options = [
-      { id: "usd", label: "USD" },
+      { id: "usd", label: "Dollars" },
       { id: "sats", label: "Sats" },
-      { id: "both", label: "Both" }
+      { id: "both", label: "Indexed comparison" }
     ];
     wrap.innerHTML = options.map(opt => (
       `<button type="button" class="toggle-btn${ppSeriesUnit === opt.id ? ' active' : ''}" data-unit="${opt.id}">${opt.label}</button>`
@@ -2413,6 +2413,18 @@ ${itemLines}`;
       rows,
       biggestGainer: sortedDesc[0] || null,
       biggestDecliner: sortedAsc[0] || null
+    };
+  }
+
+  function buildIndexedSeries(series){
+    const numeric = (series || []).map(value => {
+      const num = Number(value);
+      return isFinite(num) ? num : null;
+    });
+    const baseline = numeric.find(value => value != null && value > 0);
+    return {
+      baseline,
+      values: numeric.map(value => (value != null && isFinite(baseline) && baseline > 0 ? (value / baseline) * 100 : null))
     };
   }
 
@@ -2589,13 +2601,7 @@ ${itemLines}`;
 
     const wage = Math.max(1, Number($("ppHourlyWage")?.value) || 25);
     const labels = snapshots.map(s => fmtDate(s.ts));
-    const usdHours = snapshots.map(s => isFinite(s.basketUsd) ? Number(s.basketUsd) / wage : null);
-    const satsHours = snapshots.map(s => {
-      const btcUsd = Number(s.btcUsd);
-      if (!isFinite(s.basketSats) || !isFinite(btcUsd) || btcUsd <= 0) return null;
-      const hourlyWageSats = (wage / btcUsd) * 100000000;
-      return hourlyWageSats > 0 ? Number(s.basketSats) / hourlyWageSats : null;
-    });
+    const hoursRequired = snapshots.map(s => isFinite(s.basketUsd) ? Number(s.basketUsd) / wage : null);
 
     ppAffordabilityChart = destroyChartSafe(ppAffordabilityChart);
     ppAffordabilityChart = new Chart(canvas.getContext("2d"), {
@@ -2603,13 +2609,21 @@ ${itemLines}`;
       data: {
         labels,
         datasets: [
-          { label: "Hours needed (USD basket)", data: usdHours, borderColor: "#f59e0b", tension: .25, spanGaps: true },
-          { label: "Hours needed (sats basket)", data: satsHours, borderColor: "#22c55e", tension: .25, spanGaps: true }
+          { label: "Hours of work required", data: hoursRequired, borderColor: "#f59e0b", tension: .25, spanGaps: true }
         ]
       },
-      options: { responsive: true, maintainAspectRatio: false, animation: false }
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        scales: {
+          y: {
+            title: { display: true, text: "Hours" }
+          }
+        }
+      }
     });
-    if (note) note.textContent = `Assuming $${wage.toFixed(2)}/hour, this shows labor hours needed to buy the basket in USD and sats terms (lower is better).`;
+    if (note) note.textContent = `Assuming $${wage.toFixed(2)}/hour, this shows hours of work required to buy the basket. Because wage is entered in USD, this is a single metric; separate USD/BTC versions would be redundant.`;
   }
 
   // Package 2: Scarcity share of capped BTC supply
@@ -2767,36 +2781,54 @@ ${lines.join("\n")}`;
 
     if (satsTitle) {
       if (showUsd) {
-        satsTitle.textContent = `Basket cost in USD over time${itemSuffix}`;
+        satsTitle.textContent = `Basket cost in Dollars over time${itemSuffix}`;
       } else if (showSats) {
         satsTitle.textContent = `Basket cost in sats over time${itemSuffix} (lower is better)`;
       } else {
-        satsTitle.textContent = `Basket cost over time${itemSuffix} (USD + sats)`;
+        satsTitle.textContent = `Indexed comparison (Base = 100)${itemSuffix}`;
       }
     }
 
     const satsSeries = snapshots.map(s => isFinite(s.basketSats) ? s.basketSats : null);
     const usdSeries = snapshots.map(s => isFinite(s.basketUsd) ? s.basketUsd : null);
+    const indexedUsd = buildIndexedSeries(usdSeries);
+    const indexedSats = buildIndexedSeries(satsSeries);
 
     const datasets = [];
-    if (showUsd || showBoth) {
+    if (showUsd) {
       datasets.push({
-        label: "Basket USD",
+        label: "Dollars",
         data: usdSeries,
         borderColor: "#34d399",
         backgroundColor: "rgba(52,211,153,.15)",
-        yAxisID: "yUsd",
         tension: .25,
         spanGaps: true
       });
     }
-    if (showSats || showBoth) {
+    if (showSats) {
       datasets.push({
         label: "Basket sats (lower is better)",
         data: satsSeries,
         borderColor: "#fbbf24",
         backgroundColor: "rgba(251,191,36,.18)",
-        yAxisID: showBoth ? "ySats" : "yUsd",
+        tension: .25,
+        spanGaps: true
+      });
+    }
+    if (showBoth) {
+      datasets.push({
+        label: "USD Index",
+        data: indexedUsd.values,
+        borderColor: "#34d399",
+        backgroundColor: "rgba(52,211,153,.15)",
+        tension: .25,
+        spanGaps: true
+      });
+      datasets.push({
+        label: "BTC/Sats Index",
+        data: indexedSats.values,
+        borderColor: "#fbbf24",
+        backgroundColor: "rgba(251,191,36,.18)",
         tension: .25,
         spanGaps: true
       });
@@ -2812,38 +2844,40 @@ ${lines.join("\n")}`;
         maintainAspectRatio: false,
         animation: false,
         scales: showBoth ? {
-          yUsd: {
-            type: "linear",
-            position: "left",
+          y: {
+            title: { display: true, text: "Index (Base = 100)" },
             ticks: {
               callback: (value) => {
                 const num = Number(value);
-                if (!isFinite(num)) return value;
-                return `$${num.toLocaleString(undefined, { maximumFractionDigits: num >= 100 ? 0 : 2 })}`;
+                return isFinite(num) ? num.toFixed(0) : value;
               }
             }
-          },
-          ySats: {
-            type: "linear",
-            position: "right",
-            grid: { drawOnChartArea: false },
+          }
+        } : {
+          y: {
+            title: { display: true, text: showUsd ? "Dollars" : "Sats" },
             ticks: {
               callback: (value) => {
                 const num = Number(value);
                 if (!isFinite(num)) return value;
+                if (showUsd) {
+                  return `$${num.toLocaleString(undefined, { maximumFractionDigits: num >= 100 ? 0 : 2 })}`;
+                }
                 return `${Math.round(num).toLocaleString()} sats`;
               }
             }
           }
-        } : undefined
+        }
       }
     });
 
     if (chartNote) {
       if (showBoth) {
-        chartNote.textContent = "Both mode overlays USD and sats on separate y-axes so you can compare directional moves at the same timestamps.";
+        const usdBase = isFinite(indexedUsd.baseline) ? fmtUsd(indexedUsd.baseline) : "—";
+        const satsBase = isFinite(indexedSats.baseline) ? fmtSats(indexedSats.baseline) : "—";
+        chartNote.textContent = `Combined mode is now an indexed comparison (Base = 100) using the first valid visible point in the selected range. Baselines: USD ${usdBase}; sats ${satsBase}.`;
       } else if (showUsd) {
-        chartNote.textContent = "USD mode shows nominal basket cost changes in dollars.";
+        chartNote.textContent = "Dollars mode shows nominal basket cost changes in dollars.";
       } else {
         chartNote.textContent = "Sats mode shows bitcoin purchasing power (down is better: fewer sats needed for the basket).";
       }
