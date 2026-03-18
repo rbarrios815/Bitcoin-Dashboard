@@ -124,13 +124,17 @@ function computeWeightedBasketIndex_(items) {
   };
 }
 
-function fetchLatestSnapshot() {
+function fetchLatestSnapshot(options) {
   const props = getProps_();
   validateProps_(props);
 
+  const opts = Object.assign({ includeRawOffers: false, forceFresh: false }, options || {});
   const cache = CacheService.getScriptCache();
-  const cached = cache.get('LATEST_SNAPSHOT_V3');
-  if (cached) return JSON.parse(cached);
+  const cacheKey = 'LATEST_SNAPSHOT_V3_COMPACT';
+  if (!opts.forceFresh) {
+    const cached = cache.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+  }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const historySheet = ss.getSheetByName(props.dataSheetName);
@@ -188,7 +192,7 @@ function fetchLatestSnapshot() {
   });
 
   const weightedBasket = computeWeightedBasketIndex_(enriched);
-  const out = {
+  const fullOut = {
     ts: snapshotTs,
     btcUsd,
     items: enriched,
@@ -196,9 +200,10 @@ function fetchLatestSnapshot() {
     basketIndexUsd: weightedBasket.usd,
     basketIndexSats: weightedBasket.sats
   };
+  const compactOut = buildCompactSnapshotForCache_(fullOut);
 
-  cache.put('LATEST_SNAPSHOT_V3', JSON.stringify(out), 60 * 10);
-  return out;
+  safeCachePutJson_(cache, cacheKey, compactOut, 60 * 10);
+  return opts.includeRawOffers ? fullOut : compactOut;
 }
 
 function recordSnapshot() {
@@ -209,7 +214,7 @@ function recordSnapshot() {
   const historySheet = getOrCreateHistorySheet_(ss, props.dataSheetName);
   const rawOffersSheet = getOrCreateRawOffersSheet_(ss, props.rawOffersSheetName);
 
-  const snap = fetchLatestSnapshot();
+  const snap = fetchLatestSnapshot({ includeRawOffers: true, forceFresh: true });
   const ts = new Date(snap.ts);
 
   const rows = snap.items
@@ -1106,6 +1111,63 @@ function selectBestFetchResult_(item, results) {
   if (!valid.length) return (results || []).filter(Boolean)[0] || null;
   valid.sort((a,b) => b.selected.match_score - a.selected.match_score || a.selected.usd - b.selected.usd);
   return valid[0];
+}
+
+function buildCompactSnapshotForCache_(snapshot) {
+  // CacheService payloads are size-limited, so keep the reusable snapshot lean and
+  // intentionally strip raw offers, provider candidate arrays, and any debug/audit-only data.
+  const items = Array.isArray(snapshot && snapshot.items)
+    ? snapshot.items.map(item => ({
+        id: item.id,
+        name: item.name,
+        query: item.query,
+        canonical_query: item.canonical_query,
+        item_description: item.item_description,
+        raw_vendor_title: item.raw_vendor_title || '',
+        source_item_description: item.source_item_description || '',
+        ts: item.ts,
+        usd: item.usd,
+        sats: item.sats,
+        tracked_quantity: item.tracked_quantity,
+        tracked_unit: item.tracked_unit,
+        source_url: item.source_url || '',
+        price_source: item.price_source || '',
+        price_vendor: item.price_vendor || '',
+        is_stale: Boolean(item.is_stale),
+        validation_status: item.validation_status || '',
+        match_score: item.match_score || '',
+        normalized_price: item.normalized_price || '',
+        normalized_unit: item.normalized_unit || '',
+        fail_reason: item.fail_reason || '',
+        first_available: item.first_available || null,
+        vendor_count: item.vendor_count || 0
+      }))
+    : [];
+  return {
+    ts: snapshot && snapshot.ts ? snapshot.ts : null,
+    btcUsd: snapshot && isFinite(snapshot.btcUsd) ? snapshot.btcUsd : null,
+    basketIndexUsd: snapshot && isFinite(snapshot.basketIndexUsd) ? snapshot.basketIndexUsd : 0,
+    basketIndexSats: snapshot && isFinite(snapshot.basketIndexSats) ? snapshot.basketIndexSats : 0,
+    items: items,
+    rawOffers: []
+  };
+}
+
+function safeCachePutJson_(cache, key, obj, ttlSeconds) {
+  if (!cache || !key) return false;
+  try {
+    const payload = JSON.stringify(obj);
+    const maxBytes = 90000;
+    if (payload.length > maxBytes) {
+      Logger.log('WARN safeCachePutJson_: skipping cache key %s (%s bytes exceeds %s byte guard)', key, payload.length, maxBytes);
+      return false;
+    }
+    cache.put(key, payload, ttlSeconds);
+    return true;
+  } catch (err) {
+    Logger.log('WARN safeCachePutJson_: unable to cache key %s: %s', key, err && err.message ? err.message : err);
+    return false;
+  }
 }
 
 function collectRawOffers_(bucket, snapshotTs, item, result) {
