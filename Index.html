@@ -620,10 +620,10 @@
       </div>
       <div class="collapsible-note" id="basketExplanationWrap" hidden>
         <div class="note">
-          Inflation vs baseline is defined as ((latest basket index ÷ baseline basket index) − 1) × 100.
+          Basket Inflation Since Start is defined as ((latest basket index ÷ baseline basket index) − 1) × 100.
           Positive percentages are shown in red (inflation), while negative percentages are shown in green (deflation).
         </div>
-        <div class="note">How to read these charts: Basket Inflation shows basket cost over time in the selected unit. Basket indexes are computed as average cost per tracked item so comparisons stay fair if basket size changes. Basket Change by Item uses USD delta per item (latest USD − baseline USD); all item deltas add up to the total basket USD move, where positive values push inflation higher and negative values pull it lower.</div>
+        <div class="note">How to read these charts: Basket Inflation shows basket cost over time in the selected unit. Basket cost is computed as the weighted average cost of the included basket items. Basket index is normalized to 100 at the baseline snapshot. Basket Change by Item uses USD delta per item (latest USD − baseline USD); all item deltas add up to the total basket USD move, where positive values push inflation higher and negative values pull it lower.</div>
       </div>
       <div class="note" id="basketBaselineNote"></div>
       <div class="basket-stats" id="basketStats"></div>
@@ -1038,6 +1038,8 @@
   }
 
   function getBasketWeightByItemId(itemId){
+    const id = String(itemId || "").trim().toLowerCase();
+    if (id === "mwh") return 0;
     return 1;
   }
 
@@ -1933,10 +1935,17 @@
     if (!allItems.length) return `${header}
 No item details available.`;
 
-    const sum = present.reduce((acc, item) => acc + item.commodity, 0);
-    const avg = present.length ? (sum / present.length) : NaN;
+    let weightedTotal = 0;
+    let totalWeight = 0;
+    present.forEach(item => {
+      const weight = getBasketWeightByItemId(item.id || item.itemId);
+      if (!isFinite(weight) || weight <= 0) return;
+      weightedTotal += item.commodity * weight;
+      totalWeight += weight;
+    });
+    const avg = totalWeight ? (weightedTotal / totalWeight) : NaN;
 
-    const formulaLine = `Basket index = average of priced items in ${unitCfg.label}: ${fmtCommodityForMode(sum, mode)} ÷ ${present.length} = ${fmtCommodityForMode(avg, mode)} (configured basket size: ${allItems.length} items).`;
+    const formulaLine = `Basket cost = weighted average of included items in ${unitCfg.label}: ${fmtCommodityForMode(weightedTotal, mode)} ÷ ${totalWeight.toFixed(3)} = ${fmtCommodityForMode(avg, mode)}. Basket index is normalized to 100 at the baseline snapshot (configured basket size: ${allItems.length} items).`;
     const itemLines = allItems
       .map((item, idx) => `${idx + 1}. ${item.description}: ${item.hasValue ? fmtCommodityForMode(item.commodity, mode) : "Missing"}`)
       .join("\n");
@@ -1969,8 +1978,8 @@ ${itemLines}`;
         baselineTs,
         mode.id
       );
-      const baselineItemsTitle = buildBasketItemsTooltip("Original baseline basket index", baselineTs, baselineItemState, mode.id);
-      const currentItemsTitle = buildBasketItemsTooltip("Current basket index", currentTs, currentItemState, mode.id);
+      const baselineItemsTitle = buildBasketItemsTooltip("Original Basket Cost", baselineTs, baselineItemState, mode.id);
+      const currentItemsTitle = buildBasketItemsTooltip("Current Basket Cost", currentTs, currentItemState, mode.id);
       const series = hist.map((point, idx) => {
         const usd = usdSeries[idx];
         const sats = satsSeries[idx];
@@ -1998,15 +2007,15 @@ ${itemLines}`;
         <div class="basket-stat ${boxCls}">
           <div class="label">${escapeHtml(mode.label)}</div>
           <div class="metric">
-            <div class="label-text hoverable" tabindex="0" data-tooltip="${baselineTitle}">Original baseline basket index</div>
+            <div class="label-text hoverable" tabindex="0" data-tooltip="${baselineTitle}">Original Basket Cost</div>
             <strong class="baseline-value">${escapeHtml(fmtCommodityForMode(baseline, mode.id))}</strong>${baselineSatsInline}
           </div>
           <div class="metric">
-            <div class="label-text is-current hoverable" tabindex="0" data-tooltip="${basketIndexTitle}">Current basket index</div>
+            <div class="label-text is-current hoverable" tabindex="0" data-tooltip="${basketIndexTitle}">Current Basket Cost</div>
             <strong class="${trendCls}">${escapeHtml(fmtCommodityForMode(last, mode.id))}</strong>${currentSatsInline}
           </div>
           <div class="metric ${boxCls}">
-            <div class="inflation-label">Inflation vs baseline</div>
+            <div class="inflation-label">Basket Inflation Since Start</div>
             <strong class="${inflCls}">${inflation.toFixed(2)}%</strong>
           </div>
         </div>
@@ -2230,24 +2239,28 @@ ${itemLines}`;
         satsSeries.push(NaN);
         return;
       }
-      let sumUsd = 0;
-      let sumSats = 0;
+      let weightedUsdTotal = 0;
+      let weightedSatsTotal = 0;
+      let totalWeight = 0;
       let missing = false;
       for (const entry of baselineItems) {
         const value = entry.historyMap.get(point.ts);
+        const weight = getBasketWeightByItemId(entry.id);
+        if (!isFinite(weight) || weight <= 0) continue;
         if (!value || !isFinite(value.usd) || !isFinite(value.sats)) {
           missing = true;
           break;
         }
-        sumUsd += value.usd;
-        sumSats += value.sats;
+        weightedUsdTotal += value.usd * weight;
+        weightedSatsTotal += value.sats * weight;
+        totalWeight += weight;
       }
-      if (missing) {
+      if (missing || !totalWeight) {
         usdSeries.push(NaN);
         satsSeries.push(NaN);
       } else {
-        usdSeries.push(sumUsd / baselineCount);
-        satsSeries.push(sumSats / baselineCount);
+        usdSeries.push(weightedUsdTotal / totalWeight);
+        satsSeries.push(weightedSatsTotal / totalWeight);
         completeSnapshots += 1;
       }
     });
@@ -2451,7 +2464,7 @@ ${itemLines}`;
       snap.items.forEach(item => {
         const usd = Number(item.usd);
         const sats = Number(item.sats);
-        const weight = getBasketWeightByItemId(item.id);
+        const weight = getBasketWeightByItemId(item.id || item.itemId);
         if (!isFinite(usd) || !isFinite(sats) || !isFinite(weight) || weight <= 0) return;
         weightedUsdTotal += usd * weight;
         weightedSatsTotal += sats * weight;
@@ -2677,7 +2690,7 @@ No priced items in this snapshot.`;
     const lines = rows.map((item, idx) => {
       const usd = Number(item.usd);
       const sats = Number(item.sats);
-      const weight = getBasketWeightByItemId(item.id);
+      const weight = getBasketWeightByItemId(item.id || item.itemId);
       weightedUsdTotal += usd * weight;
       weightedSatsTotal += sats * weight;
       weightedCount += weight;
@@ -2687,7 +2700,7 @@ No priced items in this snapshot.`;
 
     const avgUsd = weightedCount ? weightedUsdTotal / weightedCount : NaN;
     const avgSats = weightedCount ? weightedSatsTotal / weightedCount : NaN;
-    const formula = `Basket index = weighted average: USD ${fmtUsd(weightedUsdTotal)} ÷ ${weightedCount.toFixed(3)} = ${fmtUsd(avgUsd)}; sats ${fmtSats(weightedSatsTotal)} ÷ ${weightedCount.toFixed(3)} = ${fmtSats(avgSats)}.`;
+    const formula = `Basket cost = weighted average: USD ${fmtUsd(weightedUsdTotal)} ÷ ${weightedCount.toFixed(3)} = ${fmtUsd(avgUsd)}; sats ${fmtSats(weightedSatsTotal)} ÷ ${weightedCount.toFixed(3)} = ${fmtSats(avgSats)}.`;
     return `${label} (${fmtDate(snapshot.ts)})
 ${formula}
 ${lines.join("\n")}`;
@@ -2709,13 +2722,13 @@ ${lines.join("\n")}`;
     if (keyLines) {
       const usdTrendClass = priceDeltaClass(last.basketUsd, first.basketUsd);
       const satsTrendClass = priceDeltaClass(last.basketSats, first.basketSats);
-      const currentBasketTooltip = escapeHtmlWithBreaks(buildPurchasingBasketTooltip("Current basket", last));
-      const originalBasketTooltip = escapeHtmlWithBreaks(buildPurchasingBasketTooltip("Original basket", first));
+      const currentBasketTooltip = escapeHtmlWithBreaks(buildPurchasingBasketTooltip("Current Basket Cost", last));
+      const originalBasketTooltip = escapeHtmlWithBreaks(buildPurchasingBasketTooltip("Original Basket Cost", first));
       keyLines.innerHTML = `
         <div class="pp-key-line highlight">
           <span class="inline-metric"><span class="label">Current BTC/USD:</span>${escapeHtml(fmtUsd(last.btcUsd))}</span>
-          <span class="inline-metric"><span class="label hoverable" tabindex="0" data-tooltip="${currentBasketTooltip}">Current basket:</span><span class="current-basket ${usdTrendClass}">${escapeHtml(fmtUsd(last.basketUsd))}</span> · <span class="current-basket ${satsTrendClass}">${escapeHtml(fmtSats(last.basketSats))}</span></span>
-          <span class="inline-metric"><span class="label hoverable" tabindex="0" data-tooltip="${originalBasketTooltip}">Original basket:</span><span class="baseline-basket">${escapeHtml(fmtUsd(first.basketUsd))}</span> · <span class="baseline-basket">${escapeHtml(fmtSats(first.basketSats))}</span></span>
+          <span class="inline-metric"><span class="label hoverable" tabindex="0" data-tooltip="${currentBasketTooltip}">Current Basket Cost:</span><span class="current-basket ${usdTrendClass}">${escapeHtml(fmtUsd(last.basketUsd))}</span> · <span class="current-basket ${satsTrendClass}">${escapeHtml(fmtSats(last.basketSats))}</span></span>
+          <span class="inline-metric"><span class="label hoverable" tabindex="0" data-tooltip="${originalBasketTooltip}">Original Basket Cost:</span><span class="baseline-basket">${escapeHtml(fmtUsd(first.basketUsd))}</span> · <span class="baseline-basket">${escapeHtml(fmtSats(first.basketSats))}</span></span>
           <span class="inline-metric"><span class="label">Snapshots in range:</span>${snapshots.length}</span>
         </div>
       `;
