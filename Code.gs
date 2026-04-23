@@ -218,12 +218,8 @@ function fetchLatestSnapshot(options) {
   const fetchableItems = items.filter(item => !isFixedBasketItemId_(item.id));
 
   const rapid = fetchItemsUsdRapidApiBatch_(fetchableItems, props);
-  const needSerp = fetchableItems.filter(item => {
-    const result = rapid.byId[item.id];
-    return !result || result.validation_status !== 'validated';
-  });
-  const serpById = props.serpApiKey && needSerp.length
-    ? fetchItemsUsdSerpApiBatch_(needSerp, props)
+  const serpById = props.serpApiKey && fetchableItems.length
+    ? fetchItemsUsdSerpApiBatch_(fetchableItems, props)
     : {};
 
   const rawOffers = [];
@@ -233,12 +229,15 @@ function fetchLatestSnapshot(options) {
       return buildFixedSnapshotItem_(item, fixed, snapshotTs);
     }
 
-    const chosen = selectBestFetchResult_(item, [rapid.byId[item.id], serpById[item.id]]);
-    collectRawOffers_(rawOffers, snapshotTs, item, rapid.byId[item.id]);
-    collectRawOffers_(rawOffers, snapshotTs, item, serpById[item.id]);
+    const itemResults = [rapid.byId[item.id], serpById[item.id]];
+    collectRawOffers_(rawOffers, snapshotTs, item, itemResults[0]);
+    collectRawOffers_(rawOffers, snapshotTs, item, itemResults[1]);
 
-    if (chosen && chosen.validation_status === 'validated' && isFinite(chosen.usd) && chosen.usd > 0) {
-      return buildValidatedSnapshotItem_(item, chosen, btcUsd, snapshotTs);
+    const aggregated = computeAggregatedItemResult_(item, itemResults, btcUsd, snapshotTs);
+    markSelectedRawOffers_(rawOffers, item.id, aggregated.selected_offer_keys);
+
+    if (aggregated && aggregated.validation_status === 'validated' && isFinite(aggregated.usd) && aggregated.usd > 0) {
+      return aggregated;
     }
 
     if (props.allowStaleFallback && historySheet) {
@@ -248,7 +247,7 @@ function fetchLatestSnapshot(options) {
       }
     }
 
-    return buildErrorSnapshotItem_(item, chosen, snapshotTs);
+    return buildErrorSnapshotItem_(item, aggregated, snapshotTs);
   });
 
   const firstAvailableByDescription = historySheet
@@ -317,7 +316,15 @@ function recordSnapshot() {
       it.is_stale,
       it.match_score || '',
       it.validation_status || '',
-      it.fail_reason || ''
+      it.fail_reason || '',
+      it.matched_source_count || '',
+      it.used_source_count || '',
+      it.aggregation_method || '',
+      it.selected_vendors || '',
+      it.selected_source_urls || '',
+      it.selected_match_scores || '',
+      it.aggregated_normalized_prices || '',
+      it.is_multi_source ? true : false
     ]));
 
   if (rows.length) {
@@ -339,7 +346,8 @@ function recordSnapshot() {
       ofr.fail_reason || '',
       ofr.match_score || '',
       ofr.source_url || '',
-      ofr.price_source || ''
+      ofr.price_source || '',
+      ofr.selected_for_aggregate ? true : false
     ]));
     rawOffersSheet.getRange(rawOffersSheet.getLastRow() + 1, 1, rawRows.length, rawRows[0].length).setValues(rawRows);
   }
@@ -966,6 +974,14 @@ function getLastKnownValidatedRow_(itemId, sheet) {
       match_score: idx.match_score != null ? Number(row[idx.match_score]) : 1,
       normalized_price: idx.normalized_price != null ? Number(row[idx.normalized_price]) : NaN,
       normalized_unit: idx.normalized_unit != null ? String(row[idx.normalized_unit] || '') : '',
+      matched_source_count: idx.matched_source_count != null ? Number(row[idx.matched_source_count]) : NaN,
+      used_source_count: idx.used_source_count != null ? Number(row[idx.used_source_count]) : NaN,
+      aggregation_method: idx.aggregation_method != null ? String(row[idx.aggregation_method] || '') : '',
+      selected_vendors: idx.selected_vendors != null ? String(row[idx.selected_vendors] || '') : '',
+      selected_source_urls: idx.selected_source_urls != null ? String(row[idx.selected_source_urls] || '') : '',
+      selected_match_scores: idx.selected_match_scores != null ? String(row[idx.selected_match_scores] || '') : '',
+      aggregated_normalized_prices: idx.aggregated_normalized_prices != null ? String(row[idx.aggregated_normalized_prices] || '') : '',
+      is_multi_source: idx.is_multi_source != null ? Boolean(row[idx.is_multi_source]) : false,
       validation_status: 'validated'
     };
   }
@@ -1112,6 +1128,128 @@ function evaluateProviderCandidates_(item, candidates, source) {
     selected = Object.assign({}, chosen, { usd: computeAcceptedUsd_(item, chosen), validation_status: 'validated', source });
   }
   return { source, offers: evaluated, validation_status: selected ? 'validated' : 'rejected', selected, error: selected ? '' : ((evaluated[0] && evaluated[0].fail_reason) || 'no_valid_candidates') };
+}
+
+function getPassingCandidateOffersForItem_(results) {
+  const out = [];
+  (results || []).filter(Boolean).forEach(result => {
+    (result.offers || []).forEach(offer => {
+      const normalized = Number(offer && offer.normalized_price);
+      if (!offer || !offer.pass) return;
+      if (!isFinite(normalized) || normalized <= 0) return;
+      out.push(Object.assign({}, offer));
+    });
+  });
+  return out;
+}
+
+function candidateOfferDedupeKey_(offer) {
+  const vendor = String(offer && offer.vendor || '').trim().toLowerCase();
+  const normalizedPrice = Number(offer && offer.normalized_price);
+  const normalizedUnit = String(offer && offer.normalized_unit || '').trim().toLowerCase();
+  const sourceUrl = String(offer && offer.source_url || '').trim().toLowerCase();
+  return [vendor, isFinite(normalizedPrice) ? normalizedPrice.toFixed(8) : '', normalizedUnit, sourceUrl].join('|');
+}
+
+function dedupeCandidateOffers_(offers) {
+  const seen = {};
+  const deduped = [];
+  (offers || []).forEach(offer => {
+    const key = candidateOfferDedupeKey_(offer);
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    deduped.push(Object.assign({}, offer, { dedupe_key: key }));
+  });
+  return deduped;
+}
+
+function rankPassingCandidateOffers_(offers) {
+  return (offers || []).slice().sort((a,b) => {
+    return Number(b.match_score || 0) - Number(a.match_score || 0)
+      || Number(a.normalized_price || 0) - Number(b.normalized_price || 0)
+      || Number(a.raw_price || 0) - Number(b.raw_price || 0);
+  });
+}
+
+function selectTopPassingOffersForAggregation_(offers, maxSources) {
+  const maxCount = Math.max(1, Number(maxSources || 5));
+  const ranked = rankPassingCandidateOffers_(offers);
+  const byVendor = {};
+  const selected = [];
+  ranked.forEach(offer => {
+    if (selected.length >= maxCount) return;
+    const vendorKey = String(offer && offer.vendor || '').trim().toLowerCase() || ('_unknown_vendor_' + selected.length);
+    if (byVendor[vendorKey]) return;
+    byVendor[vendorKey] = true;
+    selected.push(offer);
+  });
+  return selected;
+}
+
+function computeAggregatedItemResult_(item, results, btcUsd, ts) {
+  const passing = getPassingCandidateOffersForItem_(results);
+  const deduped = dedupeCandidateOffers_(passing);
+  const selected = selectTopPassingOffersForAggregation_(deduped, 5);
+  if (!selected.length) {
+    const firstResult = (results || []).filter(Boolean)[0] || {};
+    return {
+      id: item.id, name: item.name, query: item.query, canonical_query: item.canonical_query, item_description: item.canonical_description, raw_vendor_title: '', source_item_description: '', ts, usd: 0, sats: 0, tracked_quantity: item.target_quantity, tracked_unit: item.target_unit, source_url: '', price_source: firstResult && firstResult.error ? 'error:' + firstResult.error : 'error', price_vendor: '', is_stale: true, validation_status: 'rejected', match_score: '', normalized_price: '', normalized_unit: item.target_unit, fail_reason: firstResult && firstResult.error ? firstResult.error : 'no_valid_candidates',
+      matched_source_count: passing.length,
+      used_source_count: 0,
+      aggregation_method: 'none',
+      selected_vendors: '',
+      selected_source_urls: '',
+      selected_match_scores: '',
+      aggregated_normalized_prices: '',
+      is_multi_source: false,
+      selected_offer_keys: []
+    };
+  }
+
+  const normalizedPrices = selected.map(offer => Number(offer.normalized_price)).filter(n => isFinite(n) && n > 0);
+  const medianNormalized = median_(normalizedPrices);
+  const usd = isFinite(medianNormalized) && isFinite(item.target_quantity) ? medianNormalized * Number(item.target_quantity) : NaN;
+  if (!isFinite(usd) || usd <= 0) {
+    return buildErrorSnapshotItem_(item, { error: 'invalid_aggregated_price' }, ts);
+  }
+  const topOffer = selected[0];
+  const usedSourceCount = selected.length;
+  const isMulti = usedSourceCount > 1;
+  const sourceUrls = selected.map(offer => String(offer.source_url || '').trim()).filter(Boolean);
+  const vendors = selected.map(offer => String(offer.vendor || '').trim()).filter(Boolean);
+  const scores = selected.map(offer => Number(offer.match_score || 0));
+  return {
+    id: item.id,
+    name: item.name,
+    query: item.query,
+    canonical_query: item.canonical_query,
+    item_description: item.canonical_description,
+    raw_vendor_title: topOffer.raw_vendor_title || '',
+    source_item_description: topOffer.raw_vendor_title || '',
+    ts,
+    usd,
+    sats: usdToSats_(usd, btcUsd),
+    tracked_quantity: item.target_quantity,
+    tracked_unit: item.target_unit,
+    source_url: sourceUrls[0] || '',
+    price_source: isMulti ? 'multi_source_median' : 'single_source_validated',
+    price_vendor: isMulti ? (usedSourceCount + '-source aggregate') : (topOffer.vendor || ''),
+    is_stale: false,
+    validation_status: 'validated',
+    match_score: Number(topOffer.match_score || 0),
+    normalized_price: medianNormalized,
+    normalized_unit: item.target_unit,
+    fail_reason: '',
+    matched_source_count: passing.length,
+    used_source_count: usedSourceCount,
+    aggregation_method: 'median',
+    selected_vendors: vendors.join(' | '),
+    selected_source_urls: sourceUrls.join(' | '),
+    selected_match_scores: scores.join(' | '),
+    aggregated_normalized_prices: normalizedPrices.join(' | '),
+    is_multi_source: isMulti,
+    selected_offer_keys: selected.map(offer => offer.dedupe_key || candidateOfferDedupeKey_(offer))
+  };
 }
 
 function validateCandidate_(item, candidate, source) {
@@ -1263,7 +1401,15 @@ function buildCompactSnapshotForCache_(snapshot) {
         normalized_unit: item.normalized_unit || '',
         fail_reason: item.fail_reason || '',
         first_available: item.first_available || null,
-        vendor_count: item.vendor_count || 0
+        vendor_count: item.vendor_count || 0,
+        matched_source_count: item.matched_source_count || '',
+        used_source_count: item.used_source_count || '',
+        aggregation_method: item.aggregation_method || '',
+        selected_vendors: item.selected_vendors || '',
+        selected_source_urls: item.selected_source_urls || '',
+        selected_match_scores: item.selected_match_scores || '',
+        aggregated_normalized_prices: item.aggregated_normalized_prices || '',
+        is_multi_source: Boolean(item.is_multi_source)
       }))
     : [];
   return {
@@ -1295,11 +1441,21 @@ function safeCachePutJson_(cache, key, obj, ttlSeconds) {
 
 function collectRawOffers_(bucket, snapshotTs, item, result) {
   if (!result || !Array.isArray(result.offers)) return;
-  result.offers.forEach(offer => bucket.push(Object.assign({ timestamp: snapshotTs, item_id: item.id }, offer)));
+  result.offers.forEach(offer => bucket.push(Object.assign({ timestamp: snapshotTs, item_id: item.id, dedupe_key: candidateOfferDedupeKey_(offer), selected_for_aggregate: false }, offer)));
+}
+
+function markSelectedRawOffers_(bucket, itemId, selectedKeys) {
+  if (!bucket || !bucket.length || !selectedKeys || !selectedKeys.length) return;
+  const keySet = {};
+  selectedKeys.forEach(key => { if (key) keySet[key] = true; });
+  bucket.forEach(offer => {
+    if (String(offer.item_id || '').trim().toLowerCase() !== String(itemId || '').trim().toLowerCase()) return;
+    if (keySet[String(offer.dedupe_key || '')]) offer.selected_for_aggregate = true;
+  });
 }
 
 function buildFixedSnapshotItem_(item, fixed, ts) {
-  return { id: item.id, name: item.name, query: item.query, canonical_query: item.canonical_query, item_description: item.canonical_description, raw_vendor_title: '', source_item_description: '', ts, usd: fixed ? fixed.usd : 0, sats: fixed ? fixed.sats : 0, tracked_quantity: item.target_quantity, tracked_unit: item.target_unit, source_url: '', price_source: 'fixed', price_vendor: '', is_stale: false, validation_status: 'validated', match_score: 1, normalized_price: fixed ? fixed.usd : 0, normalized_unit: item.target_unit, fail_reason: '' };
+  return { id: item.id, name: item.name, query: item.query, canonical_query: item.canonical_query, item_description: item.canonical_description, raw_vendor_title: '', source_item_description: '', ts, usd: fixed ? fixed.usd : 0, sats: fixed ? fixed.sats : 0, tracked_quantity: item.target_quantity, tracked_unit: item.target_unit, source_url: '', price_source: 'fixed', price_vendor: '', is_stale: false, validation_status: 'validated', match_score: 1, normalized_price: fixed ? fixed.usd : 0, normalized_unit: item.target_unit, fail_reason: '', matched_source_count: '', used_source_count: '', aggregation_method: '', selected_vendors: '', selected_source_urls: '', selected_match_scores: '', aggregated_normalized_prices: '', is_multi_source: false };
 }
 
 function buildValidatedSnapshotItem_(item, chosenResult, btcUsd, ts) {
@@ -1309,11 +1465,11 @@ function buildValidatedSnapshotItem_(item, chosenResult, btcUsd, ts) {
 }
 
 function buildFallbackSnapshotItem_(item, last, btcUsd, ts) {
-  return { id: item.id, name: item.name, query: item.query, canonical_query: item.canonical_query, item_description: item.canonical_description, raw_vendor_title: last.raw_vendor_title || '', source_item_description: last.raw_vendor_title || '', ts, usd: last.usd, sats: usdToSats_(last.usd, btcUsd), tracked_quantity: item.target_quantity, tracked_unit: item.target_unit, source_url: last.source_url || '', price_source: 'last_known_validated', price_vendor: last.price_vendor || '', is_stale: true, validation_status: 'validated', match_score: last.match_score || '', normalized_price: last.normalized_price || '', normalized_unit: last.normalized_unit || item.target_unit, fail_reason: '' };
+  return { id: item.id, name: item.name, query: item.query, canonical_query: item.canonical_query, item_description: item.canonical_description, raw_vendor_title: last.raw_vendor_title || '', source_item_description: last.raw_vendor_title || '', ts, usd: last.usd, sats: usdToSats_(last.usd, btcUsd), tracked_quantity: item.target_quantity, tracked_unit: item.target_unit, source_url: last.source_url || '', price_source: 'last_known_validated', price_vendor: last.price_vendor || '', is_stale: true, validation_status: 'validated', match_score: last.match_score || '', normalized_price: last.normalized_price || '', normalized_unit: last.normalized_unit || item.target_unit, fail_reason: '', matched_source_count: last.matched_source_count || '', used_source_count: last.used_source_count || '', aggregation_method: last.aggregation_method || 'stale_fallback', selected_vendors: last.selected_vendors || '', selected_source_urls: last.selected_source_urls || '', selected_match_scores: last.selected_match_scores || '', aggregated_normalized_prices: last.aggregated_normalized_prices || '', is_multi_source: Boolean(last.is_multi_source) };
 }
 
 function buildErrorSnapshotItem_(item, chosen, ts) {
-  return { id: item.id, name: item.name, query: item.query, canonical_query: item.canonical_query, item_description: item.canonical_description, raw_vendor_title: '', source_item_description: '', ts, usd: 0, sats: 0, tracked_quantity: item.target_quantity, tracked_unit: item.target_unit, source_url: '', price_source: chosen && chosen.error ? 'error:' + chosen.error : 'error', price_vendor: '', is_stale: true, validation_status: 'rejected', match_score: '', normalized_price: '', normalized_unit: item.target_unit, fail_reason: chosen && chosen.error ? chosen.error : 'no_valid_candidates' };
+  return { id: item.id, name: item.name, query: item.query, canonical_query: item.canonical_query, item_description: item.canonical_description, raw_vendor_title: '', source_item_description: '', ts, usd: 0, sats: 0, tracked_quantity: item.target_quantity, tracked_unit: item.target_unit, source_url: '', price_source: chosen && chosen.error ? 'error:' + chosen.error : 'error', price_vendor: '', is_stale: true, validation_status: 'rejected', match_score: '', normalized_price: '', normalized_unit: item.target_unit, fail_reason: chosen && chosen.error ? chosen.error : 'no_valid_candidates', matched_source_count: '', used_source_count: '', aggregation_method: '', selected_vendors: '', selected_source_urls: '', selected_match_scores: '', aggregated_normalized_prices: '', is_multi_source: false };
 }
 
 function buildEmptySheetSnapshotItem_(it, fallbackBtcUsd) {
@@ -1321,19 +1477,74 @@ function buildEmptySheetSnapshotItem_(it, fallbackBtcUsd) {
     const fixed = getFixedBasketValue_(it.id, fallbackBtcUsd);
     return buildFixedSnapshotItem_(it, fixed, null);
   }
-  return { id: it.id, name: it.name, query: it.query, canonical_query: it.canonical_query, item_description: it.canonical_description, raw_vendor_title: '', source_item_description: '', usd: 0, sats: 0, tracked_quantity: it.target_quantity, tracked_unit: it.target_unit, source_url: '', price_source: '', price_vendor: '', is_stale: true, first_available: null, vendor_count: 0, validation_status: 'rejected', match_score: '', normalized_price: '', normalized_unit: it.target_unit, fail_reason: '' };
+  return { id: it.id, name: it.name, query: it.query, canonical_query: it.canonical_query, item_description: it.canonical_description, raw_vendor_title: '', source_item_description: '', usd: 0, sats: 0, tracked_quantity: it.target_quantity, tracked_unit: it.target_unit, source_url: '', price_source: '', price_vendor: '', is_stale: true, first_available: null, vendor_count: 0, validation_status: 'rejected', match_score: '', normalized_price: '', normalized_unit: it.target_unit, fail_reason: '', matched_source_count: '', used_source_count: '', aggregation_method: '', selected_vendors: '', selected_source_urls: '', selected_match_scores: '', aggregated_normalized_prices: '', is_multi_source: false };
 }
 
 function buildSheetRowDetails_(row, idx, desc) {
-  return { ts: parseSheetDate_(row[idx.timestamp]), item_id: idx.item_id != null ? String(row[idx.item_id] || '').trim() : '', item_name: idx.item_name != null ? String(row[idx.item_name] || '').trim() : '', item_description: desc, raw_vendor_title: idx.raw_vendor_title != null ? String(row[idx.raw_vendor_title] || '') : (idx.source_item_description != null ? String(row[idx.source_item_description] || '') : ''), source_item_description: idx.raw_vendor_title != null ? String(row[idx.raw_vendor_title] || '') : (idx.source_item_description != null ? String(row[idx.source_item_description] || '') : ''), usd: convertElectricityUsdToKwh_(row[idx.usd], idx.item_id != null ? row[idx.item_id] : '', idx.item_name != null ? row[idx.item_name] : '', desc), sats: Number(row[idx.sats]), price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '', price_vendor: idx.price_vendor != null ? String(row[idx.price_vendor] || '') : '', source_url: idx.source_url != null ? String(row[idx.source_url] || '') : '', is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false, validation_status: idx.validation_status != null ? String(row[idx.validation_status] || '') : 'validated', match_score: idx.match_score != null ? Number(row[idx.match_score]) : NaN, normalized_price: idx.normalized_price != null ? Number(row[idx.normalized_price]) : NaN, normalized_unit: idx.normalized_unit != null ? String(row[idx.normalized_unit] || '') : '' };
+  return {
+    ts: parseSheetDate_(row[idx.timestamp]),
+    item_id: idx.item_id != null ? String(row[idx.item_id] || '').trim() : '',
+    item_name: idx.item_name != null ? String(row[idx.item_name] || '').trim() : '',
+    item_description: desc,
+    raw_vendor_title: idx.raw_vendor_title != null ? String(row[idx.raw_vendor_title] || '') : (idx.source_item_description != null ? String(row[idx.source_item_description] || '') : ''),
+    source_item_description: idx.raw_vendor_title != null ? String(row[idx.raw_vendor_title] || '') : (idx.source_item_description != null ? String(row[idx.source_item_description] || '') : ''),
+    usd: convertElectricityUsdToKwh_(row[idx.usd], idx.item_id != null ? row[idx.item_id] : '', idx.item_name != null ? row[idx.item_name] : '', desc),
+    sats: Number(row[idx.sats]),
+    price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '',
+    price_vendor: idx.price_vendor != null ? String(row[idx.price_vendor] || '') : '',
+    source_url: idx.source_url != null ? String(row[idx.source_url] || '') : '',
+    is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false,
+    validation_status: idx.validation_status != null ? String(row[idx.validation_status] || '') : 'validated',
+    match_score: idx.match_score != null ? Number(row[idx.match_score]) : NaN,
+    normalized_price: idx.normalized_price != null ? Number(row[idx.normalized_price]) : NaN,
+    normalized_unit: idx.normalized_unit != null ? String(row[idx.normalized_unit] || '') : '',
+    matched_source_count: idx.matched_source_count != null ? Number(row[idx.matched_source_count]) : NaN,
+    used_source_count: idx.used_source_count != null ? Number(row[idx.used_source_count]) : NaN,
+    aggregation_method: idx.aggregation_method != null ? String(row[idx.aggregation_method] || '') : '',
+    selected_vendors: idx.selected_vendors != null ? String(row[idx.selected_vendors] || '') : '',
+    selected_source_urls: idx.selected_source_urls != null ? String(row[idx.selected_source_urls] || '') : '',
+    selected_match_scores: idx.selected_match_scores != null ? String(row[idx.selected_match_scores] || '') : '',
+    aggregated_normalized_prices: idx.aggregated_normalized_prices != null ? String(row[idx.aggregated_normalized_prices] || '') : '',
+    is_multi_source: idx.is_multi_source != null ? Boolean(row[idx.is_multi_source]) : false
+  };
 }
 
 function buildSnapshotItemFromHistory_(item, latestRow, latestTs) {
-  return { id: item.id, name: item.name, query: item.query, canonical_query: item.canonical_query, item_description: item.canonical_description, raw_vendor_title: latestRow ? latestRow.raw_vendor_title : '', source_item_description: latestRow ? latestRow.raw_vendor_title : '', ts: latestRow ? new Date(latestRow.ts).toISOString() : (latestTs ? latestTs.toISOString() : null), usd: latestRow ? latestRow.usd : 0, sats: latestRow ? latestRow.sats : 0, tracked_quantity: item.target_quantity, tracked_unit: item.target_unit, source_url: latestRow ? latestRow.source_url : '', price_source: latestRow ? latestRow.price_source : '', price_vendor: latestRow ? latestRow.price_vendor : '', is_stale: latestRow ? latestRow.is_stale : true, validation_status: latestRow ? latestRow.validation_status : 'rejected', match_score: latestRow ? latestRow.match_score : '', normalized_price: latestRow ? latestRow.normalized_price : '', normalized_unit: latestRow ? latestRow.normalized_unit : item.target_unit, fail_reason: '' };
+  return {
+    id: item.id,
+    name: item.name,
+    query: item.query,
+    canonical_query: item.canonical_query,
+    item_description: item.canonical_description,
+    raw_vendor_title: latestRow ? latestRow.raw_vendor_title : '',
+    source_item_description: latestRow ? latestRow.raw_vendor_title : '',
+    ts: latestRow ? new Date(latestRow.ts).toISOString() : (latestTs ? latestTs.toISOString() : null),
+    usd: latestRow ? latestRow.usd : 0,
+    sats: latestRow ? latestRow.sats : 0,
+    tracked_quantity: item.target_quantity,
+    tracked_unit: item.target_unit,
+    source_url: latestRow ? latestRow.source_url : '',
+    price_source: latestRow ? latestRow.price_source : '',
+    price_vendor: latestRow ? latestRow.price_vendor : '',
+    is_stale: latestRow ? latestRow.is_stale : true,
+    validation_status: latestRow ? latestRow.validation_status : 'rejected',
+    match_score: latestRow ? latestRow.match_score : '',
+    normalized_price: latestRow ? latestRow.normalized_price : '',
+    normalized_unit: latestRow ? latestRow.normalized_unit : item.target_unit,
+    fail_reason: '',
+    matched_source_count: latestRow ? latestRow.matched_source_count : '',
+    used_source_count: latestRow ? latestRow.used_source_count : '',
+    aggregation_method: latestRow ? latestRow.aggregation_method : '',
+    selected_vendors: latestRow ? latestRow.selected_vendors : '',
+    selected_source_urls: latestRow ? latestRow.selected_source_urls : '',
+    selected_match_scores: latestRow ? latestRow.selected_match_scores : '',
+    aggregated_normalized_prices: latestRow ? latestRow.aggregated_normalized_prices : '',
+    is_multi_source: latestRow ? latestRow.is_multi_source : false
+  };
 }
 
 function buildHistoryPointFromRow_(row, idx, rowDescription) {
-  return { ts: new Date(row[idx.timestamp]).toISOString(), source_item_description: idx.raw_vendor_title != null ? String(row[idx.raw_vendor_title] || '') : (idx.source_item_description != null ? String(row[idx.source_item_description] || '') : ''), raw_vendor_title: idx.raw_vendor_title != null ? String(row[idx.raw_vendor_title] || '') : (idx.source_item_description != null ? String(row[idx.source_item_description] || '') : ''), usd: convertElectricityUsdToKwh_(row[idx.usd], idx.item_id != null ? row[idx.item_id] : '', idx.item_name != null ? row[idx.item_name] : '', rowDescription), sats: Number(row[idx.sats]), btcUsd: Number(row[idx.btc_usd]), price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '', price_vendor: idx.price_vendor != null ? String(row[idx.price_vendor] || '') : '', source_url: idx.source_url != null ? String(row[idx.source_url] || '') : '', is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false, validation_status: idx.validation_status != null ? String(row[idx.validation_status] || '') : 'validated' };
+  return { ts: new Date(row[idx.timestamp]).toISOString(), source_item_description: idx.raw_vendor_title != null ? String(row[idx.raw_vendor_title] || '') : (idx.source_item_description != null ? String(row[idx.source_item_description] || '') : ''), raw_vendor_title: idx.raw_vendor_title != null ? String(row[idx.raw_vendor_title] || '') : (idx.source_item_description != null ? String(row[idx.source_item_description] || '') : ''), usd: convertElectricityUsdToKwh_(row[idx.usd], idx.item_id != null ? row[idx.item_id] : '', idx.item_name != null ? row[idx.item_name] : '', rowDescription), sats: Number(row[idx.sats]), btcUsd: Number(row[idx.btc_usd]), price_source: idx.price_source != null ? String(row[idx.price_source] || '') : '', price_vendor: idx.price_vendor != null ? String(row[idx.price_vendor] || '') : '', source_url: idx.source_url != null ? String(row[idx.source_url] || '') : '', is_stale: idx.is_stale != null ? Boolean(row[idx.is_stale]) : false, validation_status: idx.validation_status != null ? String(row[idx.validation_status] || '') : 'validated', matched_source_count: idx.matched_source_count != null ? Number(row[idx.matched_source_count]) : NaN, used_source_count: idx.used_source_count != null ? Number(row[idx.used_source_count]) : NaN, aggregation_method: idx.aggregation_method != null ? String(row[idx.aggregation_method] || '') : '', selected_vendors: idx.selected_vendors != null ? String(row[idx.selected_vendors] || '') : '', selected_source_urls: idx.selected_source_urls != null ? String(row[idx.selected_source_urls] || '') : '', selected_match_scores: idx.selected_match_scores != null ? String(row[idx.selected_match_scores] || '') : '', aggregated_normalized_prices: idx.aggregated_normalized_prices != null ? String(row[idx.aggregated_normalized_prices] || '') : '', is_multi_source: idx.is_multi_source != null ? Boolean(row[idx.is_multi_source]) : false };
 }
 
 function dedupeHistoryByTs_(rows) { const seen = {}; return rows.filter(row => { if (!row.ts || seen[row.ts]) return false; seen[row.ts] = true; return true; }); }
@@ -1399,7 +1610,8 @@ function getOrCreateHistorySheet_(ss, name) {
 
   const desiredHeader = [
     'timestamp', 'btc_usd', 'item_id', 'item_name', 'query', 'canonical_query', 'item_description', 'raw_vendor_title', 'source_item_description', 'usd', 'sats',
-    'normalized_price', 'normalized_unit', 'basket_index_usd', 'basket_index_sats', 'price_source', 'price_vendor', 'source_url', 'is_stale', 'match_score', 'validation_status', 'fail_reason'
+    'normalized_price', 'normalized_unit', 'basket_index_usd', 'basket_index_sats', 'price_source', 'price_vendor', 'source_url', 'is_stale', 'match_score', 'validation_status', 'fail_reason',
+    'matched_source_count', 'used_source_count', 'aggregation_method', 'selected_vendors', 'selected_source_urls', 'selected_match_scores', 'aggregated_normalized_prices', 'is_multi_source'
   ];
 
   if (sh.getLastRow() === 0) {
@@ -1456,14 +1668,22 @@ function headerIndex_(headerRow) {
     is_stale: m.is_stale !== undefined ? m.is_stale : null,
     match_score: m.match_score !== undefined ? m.match_score : null,
     validation_status: m.validation_status !== undefined ? m.validation_status : null,
-    fail_reason: m.fail_reason !== undefined ? m.fail_reason : null
+    fail_reason: m.fail_reason !== undefined ? m.fail_reason : null,
+    matched_source_count: m.matched_source_count !== undefined ? m.matched_source_count : null,
+    used_source_count: m.used_source_count !== undefined ? m.used_source_count : null,
+    aggregation_method: m.aggregation_method !== undefined ? m.aggregation_method : null,
+    selected_vendors: m.selected_vendors !== undefined ? m.selected_vendors : null,
+    selected_source_urls: m.selected_source_urls !== undefined ? m.selected_source_urls : null,
+    selected_match_scores: m.selected_match_scores !== undefined ? m.selected_match_scores : null,
+    aggregated_normalized_prices: m.aggregated_normalized_prices !== undefined ? m.aggregated_normalized_prices : null,
+    is_multi_source: m.is_multi_source !== undefined ? m.is_multi_source : null
   };
 }
 
 function getOrCreateRawOffersSheet_(ss, name) {
   let sh = ss.getSheetByName(name);
   if (!sh) sh = ss.insertSheet(name);
-  const desiredHeader = ['timestamp', 'item_id', 'vendor', 'raw_vendor_title', 'raw_price', 'parsed_quantity', 'parsed_unit', 'normalized_price', 'normalized_unit', 'pass_fail', 'fail_reason', 'match_score', 'source_url', 'price_source'];
+  const desiredHeader = ['timestamp', 'item_id', 'vendor', 'raw_vendor_title', 'raw_price', 'parsed_quantity', 'parsed_unit', 'normalized_price', 'normalized_unit', 'pass_fail', 'fail_reason', 'match_score', 'source_url', 'price_source', 'selected_for_aggregate'];
   if (sh.getLastRow() === 0) {
     sh.appendRow(desiredHeader);
     sh.setFrozenRows(1);
