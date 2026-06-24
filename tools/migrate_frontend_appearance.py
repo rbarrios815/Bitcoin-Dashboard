@@ -16,6 +16,7 @@ sw('Basket cost in Dollars over time','Fixed basket total in dollars over time',
 sw('Basket cost in sats over time','Fixed basket total in sats over time','sats chart')
 sw('text: "Basket index sats"','text: "Fixed basket total (sats)"','axis')
 sw('const NON_GROCERY_EXCLUDED_IDS = new Set(["gold", "silver", "mwh", "cash10"]);','const NON_GROCERY_EXCLUDED_IDS = new Set(["gold", "silver", "mwh", "cash10", "sats10000"]);','reference set')
+sw('if (id === "mwh") return 0;','if (NON_GROCERY_EXCLUDED_IDS.has(id)) return 0;','reference weights')
 sw('const items = purchasingPowerData?.items || [];','const items = (purchasingPowerData?.items || []).filter(item => getBasketWeightByItemId(item.itemId || item.id) > 0);','item filter')
 sw('const baselineItems = Array.isArray(itemHistories) ? itemHistories : [];','const baselineItems = (Array.isArray(itemHistories) ? itemHistories : []).filter(entry => getBasketWeightByItemId(entry.id) > 0);','baseline filter')
 sw('usdSeries.push(weightedUsdTotal / totalWeight);','usdSeries.push(weightedUsdTotal);','usd total')
