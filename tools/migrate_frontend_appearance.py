@@ -15,6 +15,11 @@ sw('Basket cost is computed as the weighted average cost of the included basket 
 sw('Basket cost in Dollars over time','Fixed basket total in dollars over time','dollar chart')
 sw('Basket cost in sats over time','Fixed basket total in sats over time','sats chart')
 sw('text: "Basket index sats"','text: "Fixed basket total (sats)"','axis')
+sw('const NON_GROCERY_EXCLUDED_IDS = new Set(["gold", "silver", "mwh", "cash10"]);','const NON_GROCERY_EXCLUDED_IDS = new Set(["gold", "silver", "mwh", "cash10", "sats10000"]);','reference set')
+sw('const items = purchasingPowerData?.items || [];','const items = (purchasingPowerData?.items || []).filter(item => getBasketWeightByItemId(item.itemId || item.id) > 0);','item filter')
+sw('const baselineItems = Array.isArray(itemHistories) ? itemHistories : [];','const baselineItems = (Array.isArray(itemHistories) ? itemHistories : []).filter(entry => getBasketWeightByItemId(entry.id) > 0);','baseline filter')
+sw('usdSeries.push(weightedUsdTotal / totalWeight);','usdSeries.push(weightedUsdTotal);','usd total')
+sw('satsSeries.push(weightedSatsTotal / totalWeight);','satsSeries.push(weightedSatsTotal);','sats total')
 css='''
     .mission-copy{margin-top:6px;color:var(--muted);font-size:12px}
     #ppHeroKpis{margin-top:14px;grid-template-columns:repeat(4,minmax(0,1fr))}
