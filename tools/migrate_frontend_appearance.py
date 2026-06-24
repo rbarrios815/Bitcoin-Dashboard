@@ -21,6 +21,9 @@ sw('const items = purchasingPowerData?.items || [];','const items = (purchasingP
 sw('const baselineItems = Array.isArray(itemHistories) ? itemHistories : [];','const baselineItems = (Array.isArray(itemHistories) ? itemHistories : []).filter(entry => getBasketWeightByItemId(entry.id) > 0);','baseline filter')
 sw('usdSeries.push(weightedUsdTotal / totalWeight);','usdSeries.push(weightedUsdTotal);','usd total')
 sw('satsSeries.push(weightedSatsTotal / totalWeight);','satsSeries.push(weightedSatsTotal);','sats total')
+sw('if (!isFinite(usd) || !isFinite(sats) || !isFinite(weight) || weight <= 0) return;','if (!isFinite(usd) || usd <= 0 || !isFinite(sats) || sats <= 0 || !isFinite(weight) || weight <= 0 || (item.validation_status && item.validation_status !== "validated")) return;','valid filtered rows')
+sw('basketUsd: weightedCount ? weightedUsdTotal / weightedCount : NaN,','basketUsd: weightedCount ? weightedUsdTotal : NaN,','filtered usd total')
+sw('basketSats: weightedCount ? weightedSatsTotal / weightedCount : NaN,','basketSats: weightedCount ? weightedSatsTotal : NaN,','filtered sats total')
 css='''
     .mission-copy{margin-top:6px;color:var(--muted);font-size:12px}
     #ppHeroKpis{margin-top:14px;grid-template-columns:repeat(4,minmax(0,1fr))}
