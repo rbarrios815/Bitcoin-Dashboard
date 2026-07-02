@@ -3,20 +3,24 @@
 <head>
   <base target="_top">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Bitcoin Purchasing Power Dashboard</title>
+  <title>Bitcoin Basket-of-Goods Index Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <div class="app">
   <header class="top">
-    <div class="brand"><div class="coin">₿</div><div><h1>Bitcoin Purchasing Power</h1><div class="subtitle">How much of the same fixed shopping basket can dollars and satoshis buy over time?</div></div></div>
-    <div class="actions"><button class="btn" id="methodBtn">Methodology</button><button class="btn primary" id="refreshBtn">Refresh snapshot</button></div>
+    <div class="brand"><div class="coin">₿</div><div><h1>Bitcoin Basket-of-Goods Index</h1><div class="subtitle">Purchasing-power index project: how much of the same fixed shopping basket can dollars and satoshis buy over time?</div></div></div>
+    <div class="actions"><button class="btn" id="methodBtn">Index methodology</button><button class="btn primary" id="refreshBtn">Refresh index snapshot</button></div>
   </header>
-  <div class="status show" id="status">Loading verified purchasing-power history…</div>
+  <section class="card" aria-label="Project identity" style="margin-bottom:14px">
+    <div class="section-title">Current project · Basket-of-Goods Index</div>
+    <div class="method"><strong>This web app measures Bitcoin purchasing power against a fixed basket of goods. It does not mine Bitcoin.</strong> The separate mining project is <strong>v6 Solo Mining Dashboard</strong>, the local app at <code>127.0.0.1:8791</code> that tracks SHA-256 hashing, shares, best difficulty, and block-finding attempts.</div>
+  </section>
+  <div class="status show" id="status">Loading verified basket-index history…</div>
   <section class="controls">
     <div class="control"><label>Range</label><select id="range"><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option><option value="ytd">Year to date</option><option value="all" selected>All history</option></select></div>
-    <div class="control"><label>View</label><select id="view"><option value="basket" selected>Fixed basket</option><option value="item">Individual item</option></select></div>
-    <div class="control" id="itemControl" style="display:none"><label>Item</label><select id="item"></select></div>
+    <div class="control"><label>Index view</label><select id="view"><option value="basket" selected>Basket-of-goods index</option><option value="item">Individual basket item</option></select></div>
+    <div class="control" id="itemControl" style="display:none"><label>Basket item</label><select id="item"></select></div>
     <div class="control"><label>Carried values</label><select id="stale"><option value="include" selected>Include + disclose</option><option value="exclude">Fresh only</option></select></div>
     <div class="spacer"></div><div class="updated" id="updated"></div>
   </section>
@@ -25,20 +29,20 @@
   <div class="grid">
     <main class="stack">
       <section class="card">
-        <div class="section-head"><div class="section-title" id="mainTitle">Fixed basket over time</div><div class="seg" id="units"><button data-unit="usd" class="active">Dollars</button><button data-unit="sats">Sats</button><button data-unit="index">Indexed</button></div></div>
+        <div class="section-head"><div class="section-title" id="mainTitle">Fixed basket index over time</div><div class="seg" id="units"><button data-unit="usd" class="active">Dollars</button><button data-unit="sats">Sats</button><button data-unit="index">Indexed</button></div></div>
         <div class="chart"><canvas id="mainChart"></canvas></div><div class="detail" id="chartNote"></div>
       </section>
       <section class="card">
-        <div class="section-head"><div class="section-title">Items ranked by purchasing-power change</div></div>
+        <div class="section-head"><div class="section-title">Basket items ranked by purchasing-power change</div></div>
         <div class="table-wrap"><table><thead><tr><th>Item</th><th>Baseline USD</th><th>Latest USD</th><th>USD change</th><th>Baseline sats</th><th>Latest sats</th><th>Sats change</th><th>Latest status</th></tr></thead><tbody id="itemRows"></tbody></table></div>
       </section>
       <section class="card"><div class="section-head"><div class="section-title">Reference comparisons</div></div><div class="references" id="references"></div></section>
     </main>
     <aside class="stack">
-      <section class="card"><div class="section-title">Latest basket composition</div><div class="chart small"><canvas id="contributionChart"></canvas></div><div class="detail">Share of the fixed basket’s current dollar total. Reference assets are excluded.</div></section>
-      <section class="card"><div class="section-title">Why the sats total changed</div><div class="chart small"><canvas id="decompositionChart"></canvas></div><div class="detail" id="decompositionNote"></div></section>
-      <section class="card"><div class="section-title">Data confidence</div><div class="quality" id="quality"></div><div class="warning" id="qualityWarning"></div></section>
-      <details class="card" id="method"><summary>Measurement contract</summary><div class="method">The basket is the sum of one standardized package for each configured grocery item—not an average. Product titles, units, quantities, normalized prices, vendor diversity, marketplace exclusions, and statistical outliers are checked before a price is accepted. Failed current retrievals may carry forward the last validated package price, but those rows are labeled and receive only 35% confidence credit. Electricity uses the official BLS U.S. city-average price-per-kWh series. Gold, silver, electricity, $10, and 10,000 sats are references and never enter grocery-basket math.</div></details>
+      <section class="card"><div class="section-title">Basket-of-goods composition</div><div class="chart small"><canvas id="contributionChart"></canvas></div><div class="detail">Share of the fixed basket’s current dollar total. Reference assets are excluded.</div></section>
+      <section class="card"><div class="section-title">Why the basket’s sats total changed</div><div class="chart small"><canvas id="decompositionChart"></canvas></div><div class="detail" id="decompositionNote"></div></section>
+      <section class="card"><div class="section-title">Index data confidence</div><div class="quality" id="quality"></div><div class="warning" id="qualityWarning"></div></section>
+      <details class="card" id="method"><summary>Basket-index measurement contract</summary><div class="method">The basket is the sum of one standardized package for each configured grocery item—not an average. Product titles, units, quantities, normalized prices, vendor diversity, marketplace exclusions, and statistical outliers are checked before a price is accepted. Failed current retrievals may carry forward the last validated package price, but those rows are labeled and receive only 35% confidence credit. Electricity uses the official BLS U.S. city-average price-per-kWh series. Gold, silver, electricity, $10, and 10,000 sats are references and never enter grocery-basket math.</div></details>
     </aside>
   </div>
 </div>
