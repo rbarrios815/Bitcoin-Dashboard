@@ -15,9 +15,19 @@ function getProps_(){
     serpApiKey:sp.getProperty(key('SERPAPI','KEY'))||'',
     serpApiEngine:sp.getProperty(key('SERPAPI','ENGINE'))||'google_shopping',
     serpApiLocation:sp.getProperty(key('SERPAPI','LOCATION'))||'',
-    serpApiNoCache:sp.getProperty(key('SERPAPI','NO_CACHE'))||''
+    serpApiNoCache:sp.getProperty(key('SERPAPI','NO_CACHE'))||'',
+    serpApiMonthlyBudget:integerProp_(sp,key('SERPAPI','MONTHLY','BUDGET'),220,0),
+    serpApiMaxSearchesPerDay:integerProp_(sp,key('SERPAPI','MAX_SEARCHES','PER_DAY'),6,0)
   };
 }
+
+function integerProp_(sp,key,defaultValue,minimum){
+  const raw=sp.getProperty(key);
+  if(raw===null||raw==='')return defaultValue;
+  const value=Math.floor(Number(raw));
+  return isFinite(value)&&value>=minimum?value:defaultValue;
+}
+
 function validateCollectionProps_(p){
   if(!p.serpApiKey&&!(p.rapidApiKey&&p.priceApiHost&&p.priceApiSearchUrl)){
     throw new Error('Configure a supported shopping-price provider in Script Properties.');
