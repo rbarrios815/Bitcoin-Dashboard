@@ -2,18 +2,24 @@ function fetchShoppingCandidates_(items, props) {
   const byId = {};
   items.forEach(function(item){ byId[item.id] = []; });
   if (props.serpApiKey) {
-    const requests = items.map(function(item) {
+    const now = new Date();
+    const plan = planSerpApiRequests_(items, props, now);
+    const serpItems = plan.items;
+    const requests = serpItems.map(function(item) {
       let url = 'https://serpapi.com/search.json?engine=' + encodeURIComponent(props.serpApiEngine || 'google_shopping') + '&q=' + encodeURIComponent(item.query) + '&api_key=' + encodeURIComponent(props.serpApiKey) + '&num=20';
       if (props.serpApiLocation) url += '&location=' + encodeURIComponent(props.serpApiLocation);
       if (String(props.serpApiNoCache).toLowerCase() === 'true') url += '&no_cache=true';
       return {url:url,muteHttpExceptions:true};
     });
-    UrlFetchApp.fetchAll(requests).forEach(function(response,i) {
+    if (requests.length) UrlFetchApp.fetchAll(requests).forEach(function(response,i) {
       try {
-        if (response.getResponseCode() !== 200) return;
-        const data = JSON.parse(response.getContentText() || '{}');
+        const status = response.getResponseCode();
+        const body = response.getContentText() || '';
+        if (isSerpApiExhaustedResponse_(status,body)) markSerpApiExhausted_(now);
+        if (status !== 200) return;
+        const data = JSON.parse(body || '{}');
         const rows = Array.isArray(data.shopping_results) ? data.shopping_results : [];
-        rows.forEach(function(x){ byId[items[i].id].push({provider:'serpapi',title:String(x.title || ''),price:numberFrom_(x.extracted_price || x.price),vendor:String(x.source || ''),url:String(x.product_link || x.link || '')}); });
+        rows.forEach(function(x){ byId[serpItems[i].id].push({provider:'serpapi',title:String(x.title || ''),price:numberFrom_(x.extracted_price || x.price),vendor:String(x.source || ''),url:String(x.product_link || x.link || '')}); });
       } catch (e) {}
     });
   }

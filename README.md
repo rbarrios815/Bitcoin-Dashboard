@@ -14,6 +14,18 @@ It also reports basket composition, item-level changes, carried-forward values, 
 
 **This repository does not mine Bitcoin.**
 
+## SerpApi query budget
+
+The daily collector refreshes a rotating subset of shopping items so a 250-search monthly plan lasts the full month. Defaults:
+
+- `SERPAPI_MONTHLY_BUDGET=220` reserves 30 provider searches outside the dashboard.
+- `SERPAPI_MAX_SEARCHES_PER_DAY=6` refreshes all 12 default SerpApi-backed items every two days.
+- A second run on the same calendar day does not consume more SerpApi searches.
+- A provider quota-exhausted response blocks additional SerpApi calls for the rest of that month.
+- Items not selected for the day's rotation continue to use visibly marked stale fallback values.
+
+Run `getSerpApiBudgetStatus()` in Apps Script to inspect the dashboard's locally tracked usage. The usage counter resets automatically when the calendar month changes.
+
 ## Separate Bitcoin projects
 
 | Project | Purpose | Location |
