@@ -26,6 +26,16 @@ The daily collector refreshes a rotating subset of shopping items so a 250-searc
 
 Run `getSerpApiBudgetStatus()` in Apps Script to inspect the dashboard's locally tracked usage. The usage counter resets automatically when the calendar month changes.
 
+## Reliability grade
+
+Current coverage and long-term reliability are separate:
+
+- Current coverage counts validated basket items whose most recent fresh observation is no more than 48 hours old.
+- The reliability grade uses the rolling scheduled-refresh record, not a single snapshot.
+- An A requires a full 30-day track record, 12/12 current basket items, zero missing latest items, and at least 95% scheduled-refresh success.
+- With six planned searches per day, 95% means at least 171 successful validations out of 180 opportunities in a 30-day window.
+- `RELIABILITY_START_DATE` defaults to `2026-09-01`, the first full provider cycle after the quota-safe collector was introduced.
+
 ## Separate Bitcoin projects
 
 | Project | Purpose | Location |
