@@ -2,7 +2,7 @@ function getPurchasingPowerDashboardData() {
   const props = getProps_();
   const active = getActiveCatalog_(props);
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(props.dataSheetName);
-  if (!sheet || sheet.getLastRow() < 2) return emptyDashboard_(active);
+  if (!sheet || sheet.getLastRow() < 2) return emptyDashboard_(active,props);
 
   const values = sheet.getDataRange().getValues();
   const header = indexHeader_(values[0]);
