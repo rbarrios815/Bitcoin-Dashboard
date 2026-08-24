@@ -48,6 +48,7 @@ function getPurchasingPowerDashboardData() {
 
   const referenceSeries = buildReferenceSeries_(Object.keys(grouped).sort(), grouped, references);
   const latest = snapshots.length ? snapshots[snapshots.length - 1] : null;
+  const reliability = buildReliability_(snapshots,itemSeries,core.length,props.serpApiMaxSearchesPerDay,new Date(),props.reliabilityStartDate);
   return {
     version:PP_VERSION,
     generatedAt:new Date().toISOString(),
@@ -56,6 +57,7 @@ function getPurchasingPowerDashboardData() {
     snapshots:snapshots,
     itemSeries:itemSeries,
     references:referenceSeries,
-    quality:latest ? latest.quality : emptyQuality_(core.length)
+    quality:latest ? latest.quality : emptyQuality_(core.length),
+    reliability:reliability
   };
 }
