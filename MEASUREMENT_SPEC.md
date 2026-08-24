@@ -6,7 +6,7 @@ The dashboard measures how much of the same standardized real-world shopping bas
 
 ## Canonical basket
 
-The core basket contains exactly the configured ten grocery items. Each item represents one fixed target package, such as a 3 lb bag of Honeycrisp apples or one dozen large Grade A eggs.
+The core basket contains exactly the configured grocery items. Each item represents one fixed target package, such as a 3 lb bag of Honeycrisp apples or one dozen large Grade A eggs.
 
 The basket total is the **sum of valid standardized package prices**. It is not an average. Gold, silver, electricity, $10, and 10,000 sats are reference series and never contribute to grocery-basket math.
 
@@ -28,17 +28,20 @@ A range comparison must use the same item identities at both boundaries. Missing
 
 Electricity is not a shopping product. The reference uses BLS series `APU000072610`, Electricity per KWH in U.S. city average, multiplied by the tracked 5 kWh quantity. This is a monthly national benchmark, not a Houston utility-bill quote.
 
-## Confidence grade
+## Current coverage and reliability grade
 
-Fresh observations receive full credit. Carried-forward observations receive 35% credit. Missing or rejected items receive no credit.
+Current coverage is not a letter grade. An item is current when its latest usable basket value is backed by a validated fresh observation collected within the previous 48 hours. The interface reports current, older, and missing counts separately.
 
-- A: score at least 95
-- B: at least 80
-- C: at least 60
-- D: at least 40
-- F: below 40
+The reliability grade measures sustained operation over the rolling scheduled-refresh window. An A is permitted only when all of these conditions hold:
 
-Short-window sats changes with carried-forward grocery prices are provisional because BTC/USD can move while merchandise observations remain unchanged.
+- At least 30 calendar days have elapsed since the configured reliability start date.
+- Every configured grocery item is current within 48 hours.
+- No latest basket item is missing.
+- At least 95% of scheduled refresh opportunities succeeded during the rolling window.
+
+With the default six-search daily plan, the 30-day denominator is 180 and an A requires at least 171 successful validations. Lower grades use the weaker of current-coverage percentage and scheduled-refresh success: B at 80, C at 60, D at 40, and F below 40. Before 30 days, the grade is `Building`.
+
+Short-window sats changes with older grocery prices remain provisional because BTC/USD can move while merchandise observations remain unchanged.
 
 ## Primary headline
 

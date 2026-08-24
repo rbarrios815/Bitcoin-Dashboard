@@ -8,7 +8,33 @@ function testMeasurementContract(){
   const outliers=removeOutliers_([{normalizedPrice:1.64},{normalizedPrice:3.98},{normalizedPrice:9.99},{normalizedPrice:118.85}]);
   if(outliers.some(function(row){return row.normalizedPrice===118.85;}))throw new Error('Outlier filter regression.');
   testSerpApiBudget_();
+  testReliabilityGrade_();
   return{ok:true,version:PP_VERSION};
+}
+
+function testReliabilityGrade_(){
+  const dayMs=24*60*60*1000;
+  const now=new Date('2026-09-30T12:00:00Z');
+  const snapshots=[];
+  for(let offset=29;offset>=0;offset--)snapshots.push({ts:new Date(now.getTime()-offset*dayMs).toISOString(),freshCount:6,missingCount:0});
+  const series=[];
+  for(let i=0;i<12;i++)series.push({id:'item_'+i,history:[{ts:now.toISOString(),usd:1,isStale:false}]});
+  const complete=buildReliability_(snapshots,series,12,6,now,'2026-09-01');
+  if(complete.grade!=='A'||complete.successfulRefreshes!==180)throw new Error('Complete 30-day reliability record must earn A.');
+  const duplicate=snapshots.concat([{ts:new Date(now.getTime()+60*60*1000).toISOString(),freshCount:0,missingCount:0}]);
+  if(buildReliability_(duplicate,series,12,6,now,'2026-09-01').successfulRefreshes!==180)throw new Error('A same-day no-search retry must not erase a successful scheduled refresh.');
+  const ninetyFive=snapshots.map(function(row,index){return Object.assign({},row,{freshCount:index<28?6:index===28?3:0});});
+  const threshold=buildReliability_(ninetyFive,series,12,6,now,'2026-09-01');
+  if(threshold.grade!=='A'||threshold.refreshSuccessPct!==95)throw new Error('A threshold must accept 171 of 180 scheduled refreshes.');
+  const below=snapshots.map(function(row,index){return Object.assign({},row,{freshCount:index<28?6:index===28?2:0});});
+  if(buildReliability_(below,series,12,6,now,'2026-09-01').grade==='A')throw new Error('Below 95% scheduled success cannot earn A.');
+  const aged=JSON.parse(JSON.stringify(series));
+  aged[0].history[0].ts=new Date(now.getTime()-72*60*60*1000).toISOString();
+  const staleGate=buildReliability_(snapshots,aged,12,6,now,'2026-09-01');
+  if(staleGate.grade==='A'||staleGate.currentItems!==11)throw new Error('An item older than 48 hours must block A.');
+  const building=buildReliability_(snapshots.slice(-2),series,12,6,new Date('2026-09-02T12:00:00Z'),'2026-09-01');
+  if(building.grade!=='Building')throw new Error('A requires a full 30-day track record.');
+  return{ok:true};
 }
 
 function testSerpApiBudget_(){

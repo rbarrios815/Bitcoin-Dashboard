@@ -6,10 +6,10 @@
  * - The grocery basket is a SUM of one standardized package per active grocery item.
  * - Gold, silver, electricity, $10, and 10,000 sats are reference series only.
  * - Current retrieval failures may carry forward the last valid USD package price,
- *   but the observation remains visibly stale and receives reduced confidence credit.
+ *   while current coverage and rolling reliability remain separately disclosed.
  */
 
-const PP_VERSION = '2.0.0';
+const PP_VERSION = '2.1.0';
 const HISTORY_HEADER = [
   'timestamp','btc_usd','item_id','item_name','query','canonical_query',
   'item_description','raw_vendor_title','source_item_description','usd','sats',

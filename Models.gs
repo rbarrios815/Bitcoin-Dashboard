@@ -16,6 +16,78 @@ function quality_(fresh, stale, missing, expected) {
 }
 function emptyQuality_(count){return quality_(0,0,count,count);}
 
+function buildReliability_(snapshots,itemSeries,expected,maxPerDay,now,startDate){
+  const dayMs=24*60*60*1000;
+  const current=now instanceof Date?now:new Date(now||Date.now());
+  const currentMs=current.getTime();
+  const configuredStart=new Date(String(startDate||''));
+  const start=isNaN(configuredStart.getTime())?current:configuredStart;
+  const startDay=Date.UTC(start.getUTCFullYear(),start.getUTCMonth(),start.getUTCDate());
+  const todayDay=Date.UTC(current.getUTCFullYear(),current.getUTCMonth(),current.getUTCDate());
+  const trackingDays=todayDay<startDay?0:Math.floor((todayDay-startDay)/dayMs)+1;
+  const recentMs=48*60*60*1000;
+  let currentItems=0;
+  (itemSeries||[]).forEach(function(series){
+    const history=series.history||[];
+    const latest=history.length?history[history.length-1]:null;
+    let lastFreshMs=null;
+    for(let i=history.length-1;i>=0;i--){
+      const row=history[i];
+      if(!row.isStale&&finitePositive_(row.usd)){
+        const parsed=new Date(row.ts).getTime();
+        if(isFinite(parsed)){lastFreshMs=parsed;break;}
+      }
+    }
+    const ageMs=lastFreshMs===null?Infinity:Math.max(0,currentMs-lastFreshMs);
+    if(latest&&finitePositive_(latest.usd)&&ageMs<=recentMs)currentItems++;
+  });
+  const latestSnapshot=snapshots&&snapshots.length?snapshots[snapshots.length-1]:null;
+  const missingItems=latestSnapshot?Number(latestSnapshot.missingCount||0):expected;
+  const outdatedItems=Math.max(0,expected-currentItems-missingItems);
+  const currentCoveragePct=expected?currentItems/expected*100:0;
+  const plannedPerDay=Math.min(expected,Math.max(0,Math.floor(Number(maxPerDay)||0)));
+  const windowDays=Math.min(30,trackingDays);
+  const earliestWindowDay=Math.max(startDay,todayDay-29*dayMs);
+  const dailyLatest={};
+  (snapshots||[]).forEach(function(snapshot){
+    const parsed=new Date(snapshot.ts);
+    if(isNaN(parsed.getTime()))return;
+    const day=Date.UTC(parsed.getUTCFullYear(),parsed.getUTCMonth(),parsed.getUTCDate());
+    if(day<earliestWindowDay||day>todayDay)return;
+    const key=String(day),existing=dailyLatest[key],candidateFresh=Math.max(0,Number(snapshot.freshCount)||0),existingFresh=existing?Math.max(0,Number(existing.freshCount)||0):-1;
+    if(!existing||candidateFresh>existingFresh||(candidateFresh===existingFresh&&new Date(existing.ts).getTime()<parsed.getTime()))dailyLatest[key]=snapshot;
+  });
+  let successfulRefreshes=0;
+  Object.keys(dailyLatest).forEach(function(key){
+    successfulRefreshes+=Math.min(plannedPerDay,Math.max(0,Number(dailyLatest[key].freshCount)||0));
+  });
+  const expectedRefreshes=windowDays*plannedPerDay;
+  const refreshSuccessPct=expectedRefreshes?successfulRefreshes/expectedRefreshes*100:0;
+  const mature=trackingDays>=30;
+  const aEligible=mature&&currentItems===expected&&missingItems===0&&refreshSuccessPct>=95;
+  const limitingScore=Math.min(currentCoveragePct,refreshSuccessPct);
+  const grade=!mature?'Building':aEligible?'A':limitingScore>=80?'B':limitingScore>=60?'C':limitingScore>=40?'D':'F';
+  return {
+    trackingStartDate:String(startDate||''),
+    trackingDays:trackingDays,
+    requiredTrackingDays:30,
+    mature:mature,
+    currentWindowHours:48,
+    currentItems:currentItems,
+    expectedItems:expected,
+    outdatedItems:outdatedItems,
+    missingItems:missingItems,
+    currentCoveragePct:currentCoveragePct,
+    plannedSearchesPerDay:plannedPerDay,
+    windowDays:windowDays,
+    successfulRefreshes:successfulRefreshes,
+    expectedRefreshes:expectedRefreshes,
+    refreshSuccessPct:refreshSuccessPct,
+    grade:grade,
+    aRequirements:{minimumDays:30,currentItemsRequired:expected,maximumAgeHours:48,minimumRefreshSuccessPct:95,missingItemsAllowed:0}
+  };
+}
+
 function normalizeHistoricalItem_(row,item,btcUsd) {
   if (!row) return null;
   const usd=Number(row.usd);

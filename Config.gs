@@ -17,7 +17,8 @@ function getProps_(){
     serpApiLocation:sp.getProperty(key('SERPAPI','LOCATION'))||'',
     serpApiNoCache:sp.getProperty(key('SERPAPI','NO_CACHE'))||'',
     serpApiMonthlyBudget:integerProp_(sp,key('SERPAPI','MONTHLY','BUDGET'),220,0),
-    serpApiMaxSearchesPerDay:integerProp_(sp,key('SERPAPI','MAX_SEARCHES','PER_DAY'),6,0)
+    serpApiMaxSearchesPerDay:integerProp_(sp,key('SERPAPI','MAX_SEARCHES','PER_DAY'),6,0),
+    reliabilityStartDate:sp.getProperty(key('RELIABILITY','START','DATE'))||'2026-09-01'
   };
 }
 
