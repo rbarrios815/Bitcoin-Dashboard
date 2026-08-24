@@ -116,9 +116,7 @@
     $('stale').onchange=e=>{state.stale=e.target.value;render();};
     $('units').onclick=e=>{if(!e.target.dataset.unit)return;state.unit=e.target.dataset.unit;[...$('units').querySelectorAll('button')].forEach(b=>b.classList.toggle('active',b===e.target));renderMainChart();};
     $('methodBtn').onclick=()=>{$('method').open=true;$('method').scrollIntoView({behavior:'smooth'});};
-    $('refreshBtn').onclick=refresh;
   }
-  async function refresh(){const b=$('refreshBtn');b.disabled=true;setStatus('Collecting a new validated snapshot…');try{const result=await appCall('recordSnapshot');setStatus(`Recorded ${result.rowsAppended} rows. Reloading…`);await load();}catch(e){setStatus(e.message||String(e),true);}finally{b.disabled=false;}}
   async function load(){try{setStatus('Loading verified purchasing-power history…');state.data=await appCall('getPurchasingPowerDashboardData');const items=state.data.itemSeries||[];$('item').innerHTML=items.map(x=>`<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('');state.item=state.item||items[0]?.id||null;render();hideStatus();}catch(e){setStatus(e.message||String(e),true);}}
   wire();load();
 </script>
