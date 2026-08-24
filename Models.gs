@@ -54,8 +54,8 @@ function buildReliability_(snapshots,itemSeries,expected,maxPerDay,now,startDate
     if(isNaN(parsed.getTime()))return;
     const day=Date.UTC(parsed.getUTCFullYear(),parsed.getUTCMonth(),parsed.getUTCDate());
     if(day<earliestWindowDay||day>todayDay)return;
-    const key=String(day);
-    if(!dailyLatest[key]||new Date(dailyLatest[key].ts).getTime()<parsed.getTime())dailyLatest[key]=snapshot;
+    const key=String(day),existing=dailyLatest[key],candidateFresh=Math.max(0,Number(snapshot.freshCount)||0),existingFresh=existing?Math.max(0,Number(existing.freshCount)||0):-1;
+    if(!existing||candidateFresh>existingFresh||(candidateFresh===existingFresh&&new Date(existing.ts).getTime()<parsed.getTime()))dailyLatest[key]=snapshot;
   });
   let successfulRefreshes=0;
   Object.keys(dailyLatest).forEach(function(key){
