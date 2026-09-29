@@ -9,7 +9,7 @@
  *   while current coverage and rolling reliability remain separately disclosed.
  */
 
-const PP_VERSION = '2.1.0';
+const PP_VERSION = '2.2.0';
 const HISTORY_HEADER = [
   'timestamp','btc_usd','item_id','item_name','query','canonical_query',
   'item_description','raw_vendor_title','source_item_description','usd','sats',
@@ -22,7 +22,7 @@ const HISTORY_HEADER = [
 const RAW_HEADER = [
   'timestamp','item_id','vendor','raw_vendor_title','raw_price','parsed_quantity',
   'parsed_unit','normalized_price','normalized_unit','pass_fail','fail_reason',
-  'match_score','source_url','price_source','selected_for_aggregate'
+  'match_score','source_url','price_source','selected_for_aggregate','size_evidence','size_source','validation_version'
 ];
 const REFERENCE_IDS = ['gold','silver','mwh','cash10','sats10000'];
 const MARKETPLACE_RE = /(ebay|etsy|whatnot|shop\s*lc|alibaba|aliexpress|temu)/i;
@@ -35,7 +35,7 @@ const CATALOG = [
   {id:'eggs',name:'Eggs',description:'Grade A large eggs 12 count',query:'grade a large eggs 12 count',required:['egg'],excluded:['liquid','substitute'],unit:'count',quantity:12,category:'dairy',bounds:[0.05,2]},
   {id:'milk',name:'Milk',description:'Whole milk 1 gallon',query:'whole milk 1 gallon',required:['whole','milk'],excluded:['almond','oat','soy','skim','2%'],unit:'gallon',quantity:1,category:'dairy',bounds:[1,15]},
   {id:'butter',name:'Butter',description:'Unsalted butter 16 oz',query:'unsalted butter 16 oz',required:['unsalted','butter'],excluded:['spread','margarine'],unit:'oz',quantity:16,category:'dairy',bounds:[0.08,2]},
-  {id:'bread',name:'Bread',description:'Sandwich bread 20 oz loaf',query:'sandwich bread 20 oz loaf',required:['bread','sandwich'],excluded:['bun','bagel','roll','gluten free'],unit:'oz',quantity:20,category:'bakery',bounds:[0.03,1.5]},
+  {id:'bread',name:'Bread',description:'Sandwich bread 20 oz loaf',query:'sandwich bread 20 oz loaf',required:['bread'],excluded:['bun','bagel','roll','gluten free','gluten-free','breadcrumbs','bread crumbs','breadsticks','garlic','naan','pita','flatbread','banana','pumpkin','cornbread','raisin'],unit:'oz',quantity:20,category:'bakery',bounds:[0.03,1.5]},
   {id:'rice',name:'Rice',description:'Long grain white rice 5 lb bag',query:'long grain white rice 5 lb bag',required:['rice','long','white'],excluded:['brown','cauliflower','minute'],unit:'lb',quantity:5,category:'pantry',bounds:[0.15,8]},
   {id:'chicken',name:'Chicken',description:'Boneless skinless chicken breast 2 lb',query:'boneless skinless chicken breast 2 lb',required:['chicken','breast','boneless','skinless'],excluded:['whole','thigh','wing','drumstick','tender'],unit:'lb',quantity:2,category:'meat',bounds:[1,20]},
   {id:'ground_beef',name:'Ground Beef',description:'Ground beef 80/20 1 lb',query:'ground beef 80/20 1 lb',required:['ground','beef'],excluded:['patty','wagyu'],unit:'lb',quantity:1,category:'meat',bounds:[2,30]},
@@ -84,3 +84,4 @@ function getConfig() {
     referenceItems: active.filter(function(item){ return !isCoreItem_(item); }).map(publicItem_)
   };
 }
+

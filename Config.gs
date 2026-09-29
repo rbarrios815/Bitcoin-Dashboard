@@ -6,6 +6,9 @@ function getProps_(){
     priceApiHost:sp.getProperty(key('PRICE','API','HOST'))||'',
     priceApiSearchUrl:sp.getProperty(key('PRICE','API','SEARCH_URL'))||'',
     dataSheetName:sp.getProperty(key('DATA','SHEET','NAME'))||'GroceryPriceHistory',
+    refreshLogSheetName:sp.getProperty('REFRESH_LOG_SHEET_NAME')||'RefreshSchedule',
+    serpApiCoreSearchesPerDay:integerProp_(sp,'SERPAPI_CORE_SEARCHES_PER_DAY',6,0),
+    serpApiReferenceIntervalDays:integerProp_(sp,'SERPAPI_REFERENCE_INTERVAL_DAYS',7,1),
     rawOffersSheetName:sp.getProperty(key('RAW','OFFERS','SHEET_NAME'))||'RawOffers',
     itemList:sp.getProperty(key('ITEM','LIST'))||'',
     countryCode:sp.getProperty(key('COUNTRY','CODE'))||'us',
@@ -17,7 +20,8 @@ function getProps_(){
     serpApiLocation:sp.getProperty(key('SERPAPI','LOCATION'))||'',
     serpApiNoCache:sp.getProperty(key('SERPAPI','NO_CACHE'))||'',
     serpApiMonthlyBudget:integerProp_(sp,key('SERPAPI','MONTHLY','BUDGET'),220,0),
-    serpApiMaxSearchesPerDay:integerProp_(sp,key('SERPAPI','MAX_SEARCHES','PER_DAY'),6,0),
+    serpApiMaxSearchesPerDay:integerProp_(sp,key('SERPAPI','MAX_SEARCHES','PER_DAY'),8,0),
+    legacyReliabilitySearchesPerDay:integerProp_(sp,'RELIABILITY_LEGACY_SEARCHES_PER_DAY',6,0),
     reliabilityStartDate:sp.getProperty(key('RELIABILITY','START','DATE'))||'2026-09-01'
   };
 }
@@ -34,3 +38,4 @@ function validateCollectionProps_(p){
     throw new Error('Configure a supported shopping-price provider in Script Properties.');
   }
 }
+

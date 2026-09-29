@@ -1,0 +1,120 @@
+{
+  "period": "2026-09-01 through 2026-09-29",
+  "scheduled_denominator_basis": "reconstructed old main-branch alternating rotation; not an authoritative request log",
+  "actual_successes": 95,
+  "replay_successes": 102,
+  "reconstructed_scheduled": 144,
+  "nonempty_grocery_groups": 110,
+  "items": [
+    {
+      "id": "apples",
+      "scheduled": 14,
+      "queriesWithOffers": 11,
+      "fresh": 8,
+      "replayed": 8,
+      "lastFresh": "9/28/2026",
+      "lastReplay": "9/28/2026",
+      "offers": 439,
+      "passing": 37
+    },
+    {
+      "id": "bananas",
+      "scheduled": 14,
+      "queriesWithOffers": 12,
+      "fresh": 12,
+      "replayed": 12,
+      "lastFresh": "9/28/2026",
+      "lastReplay": "9/28/2026",
+      "offers": 480,
+      "passing": 132
+    },
+    {
+      "id": "eggs",
+      "scheduled": 14,
+      "queriesWithOffers": 10,
+      "fresh": 10,
+      "replayed": 10,
+      "lastFresh": "9/28/2026",
+      "lastReplay": "9/28/2026",
+      "offers": 400,
+      "passing": 61
+    },
+    {
+      "id": "milk",
+      "scheduled": 14,
+      "queriesWithOffers": 12,
+      "fresh": 11,
+      "replayed": 11,
+      "lastFresh": "9/28/2026",
+      "lastReplay": "9/28/2026",
+      "offers": 480,
+      "passing": 60
+    },
+    {
+      "id": "butter",
+      "scheduled": 14,
+      "queriesWithOffers": 12,
+      "fresh": 8,
+      "replayed": 12,
+      "lastFresh": "9/28/2026",
+      "lastReplay": "9/28/2026",
+      "offers": 480,
+      "passing": 53
+    },
+    {
+      "id": "bread",
+      "scheduled": 14,
+      "queriesWithOffers": 8,
+      "fresh": 6,
+      "replayed": 8,
+      "lastFresh": "9/26/2026",
+      "lastReplay": "9/28/2026",
+      "offers": 320,
+      "passing": 18
+    },
+    {
+      "id": "rice",
+      "scheduled": 15,
+      "queriesWithOffers": 10,
+      "fresh": 8,
+      "replayed": 9,
+      "lastFresh": "9/25/2026",
+      "lastReplay": "9/27/2026",
+      "offers": 400,
+      "passing": 34
+    },
+    {
+      "id": "chicken",
+      "scheduled": 15,
+      "queriesWithOffers": 9,
+      "fresh": 9,
+      "replayed": 9,
+      "lastFresh": "9/29/2026",
+      "lastReplay": "9/29/2026",
+      "offers": 360,
+      "passing": 26
+    },
+    {
+      "id": "ground_beef",
+      "scheduled": 15,
+      "queriesWithOffers": 14,
+      "fresh": 14,
+      "replayed": 14,
+      "lastFresh": "9/29/2026",
+      "lastReplay": "9/29/2026",
+      "offers": 559,
+      "passing": 173
+    },
+    {
+      "id": "potatoes",
+      "scheduled": 15,
+      "queriesWithOffers": 12,
+      "fresh": 9,
+      "replayed": 9,
+      "lastFresh": "9/29/2026",
+      "lastReplay": "9/29/2026",
+      "offers": 480,
+      "passing": 89
+    }
+  ]
+}
