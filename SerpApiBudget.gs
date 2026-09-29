@@ -28,7 +28,7 @@ function serpApiCalendarKeys_(now){
   return{
     month:Utilities.formatDate(date,zone,'yyyy-MM'),
     day:Utilities.formatDate(date,zone,'yyyy-MM-dd'),
-    dayNumber:Math.floor(date.getTime()/86400000)
+    dayNumber:Math.floor(Date.parse(Utilities.formatDate(date,zone,'yyyy-MM-dd')+'T00:00:00Z')/86400000)
   };
 }
 
@@ -53,18 +53,43 @@ function serpApiBudgetState_(props,now){
   };
 }
 
+// Core and references have independent cursors. A reference never displaces a grocery.
+function selectGroceryPlan_(items,props,state,cursor,referenceCursor,lastReferenceDay){
+  const core=(items||[]).filter(isCoreItem_);
+  const references=(items||[]).filter(function(item){return !isCoreItem_(item);});
+  const dailyCore=Math.min(core.length,props.serpApiCoreSearchesPerDay===undefined?6:props.serpApiCoreSearchesPerDay,state.maxPerDay);
+  const allowance=calculateSerpApiAllowance_(state.monthlyBudget,state.used,state.maxPerDay,items.length);
+  const take=Math.min(dailyCore,allowance);
+  const selected=[];
+  for(let i=0;i<take;i++)selected.push(core[(cursor+i)%core.length]);
+  const parts=state.keys.day.split('-').map(Number);
+  const remainingDays=new Date(Date.UTC(parts[0],parts[1],0)).getUTCDate()-parts[2];
+  // Reserve all remaining core days before spending surplus on references.
+  const surplus=Math.max(0,state.monthlyBudget-state.used-take-remainingDays*dailyCore);
+  const due=lastReferenceDay===null||state.keys.dayNumber-lastReferenceDay>=(props.serpApiReferenceIntervalDays||7);
+  const referenceTake=due?Math.min(references.length,allowance-take,surplus):0;
+  for(let i=0;i<referenceTake;i++)selected.push(references[(referenceCursor+i)%references.length]);
+  return{items:selected,coreCount:take,referenceCount:referenceTake};
+}
+
 function planSerpApiRequests_(items,props,now){
   const state=serpApiBudgetState_(props,now);
   if(state.blockedMonth===state.keys.month)return{items:[],reason:'provider_quota_exhausted',state:state};
   if(state.lastSearchDate===state.keys.day)return{items:[],reason:'already_searched_today',state:state};
-  const allowed=calculateSerpApiAllowance_(state.monthlyBudget,state.used,state.maxPerDay,(items||[]).length);
-  if(!allowed)return{items:[],reason:'local_monthly_budget_reached',state:state};
-  const selected=selectSerpApiRotation_(items,allowed,state.keys.dayNumber);
   const sp=PropertiesService.getScriptProperties();
-  sp.setProperty(SERPAPI_USAGE_COUNT_KEY,String(state.used+selected.length));
+  const cursor=Number(sp.getProperty('SERPAPI_CORE_CURSOR')||0);
+  const refCursor=Number(sp.getProperty('SERPAPI_REFERENCE_CURSOR')||0);
+  const lastRef=sp.getProperty('SERPAPI_REFERENCE_DAY');
+  const plan=selectGroceryPlan_(items,props,state,cursor,refCursor,lastRef===null?null:Number(lastRef));
+  if(!plan.items.length)return{items:[],reason:'local_budget_reached',state:state};
+  // Conservative reservation: crashes consume the local allowance rather than enable duplicate calls.
+  sp.setProperty(SERPAPI_USAGE_COUNT_KEY,String(state.used+plan.items.length));
   sp.setProperty(SERPAPI_LAST_SEARCH_DATE_KEY,state.keys.day);
-  state.used+=selected.length;
-  return{items:selected,reason:'scheduled_rotation',state:state};
+  sp.setProperty('SERPAPI_CORE_CURSOR',String(cursor+plan.coreCount));
+  sp.setProperty('SERPAPI_REFERENCE_CURSOR',String(refCursor+plan.referenceCount));
+  if(plan.referenceCount)sp.setProperty('SERPAPI_REFERENCE_DAY',String(state.keys.dayNumber));
+  state.used+=plan.items.length;
+  return{items:plan.items,reason:'scheduled_rotation',state:state};
 }
 
 function isSerpApiExhaustedResponse_(status,body){
@@ -91,3 +116,4 @@ function getSerpApiBudgetStatus(){
     providerBlockedForMonth:state.blockedMonth===state.keys.month
   };
 }
+
