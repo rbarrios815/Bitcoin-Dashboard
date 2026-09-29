@@ -86,7 +86,7 @@ Calculation: arithmetic mean of the best N item-level replay successes/scheduled
 
 ## Tests, deployment and rollback
 
-`node tests/run.js` runs all existing `testMeasurementContract()` tests and 30 new regression groups. They cover the requested A boundaries, actual denominators, reference-only failure isolation, 48-hour boundary, latest missing values, future data, duplicate and sparse schedules, pre-ledger reset, Chicago dates, 28/29/30/31-day budget/rotation simulations, explicit low caps, quota blocks, month resets/cursor persistence, pre-request durable writes, Sheet write failures, normalization, conservative metadata and unchanged basket arithmetic. All pass. Apps Script backend sources and frontend JavaScript compile in Node's VM; manifest JSON parses; `git diff --check` passes. No billable live SerpApi calls were made and no Apps Script deployment was exercised.
+`node tests/run.js` runs all existing `testMeasurementContract()` tests and 36 new regression groups. They cover the requested A boundaries, actual denominators, reference-only failure isolation, 48-hour boundary, latest missing values, future data, duplicate and sparse schedules, pre-ledger reset, Chicago dates, 28/29/30/31-day budget/rotation simulations, explicit low caps, quota blocks, month resets/cursor persistence, pre-request durable writes, Sheet write failures, normalization, conservative metadata and unchanged basket arithmetic. All pass. Apps Script backend sources and frontend JavaScript compile in Node's VM; manifest JSON parses; `git diff --check` passes. No billable live SerpApi calls were made and no Apps Script deployment was exercised.
 
 Reproduce title-only replay from bounded connector range exports (JSON objects with a `values` array):
 
@@ -115,7 +115,13 @@ Rollback: redeploy the prior Apps Script version. Leave the additive schedule ta
 | `Models.gs` | Append validation evidence/version to new raw rows; basket/index math unchanged |
 | `RuntimeUtils.gs` | Empty-dashboard v3 reliability contract |
 | `App.html`, `Index.html` | Dynamic grocery counts, visible actual numerator/denominator and methodology/coverage wording |
-| `tests/run.js` (new) | Run legacy tests and 30 targeted regression groups without paid/provider access |
+| `tests/run.js` (new) | Run legacy tests and 36 targeted regression groups without paid/provider access |
 | `scripts/replay-september.js` (new) | Read-only historical replay utility |
 | `docs/september-2026-replay-summary.json` (new) | Compact per-item audit results, without Sheet IDs or offer URLs |
 | `README.md`, `MEASUREMENT_SPEC.md`, this audit | Budget/methodology transition, evidence, exact outcomes, limitations and deployment/rollback |
+
+## PR review follow-up — September 29, 2026
+
+The automated review identified that an empty SerpApi plan inadvertently suppressed an otherwise configured RapidAPI provider. This is fixed: the backup continues the shared rotation when the primary reaches its budget or quota block, with a separate daily reservation/cap and no additional SerpApi usage. If both providers run, they contribute to one pre-recorded item/day opportunity. Same-day retries cannot inflate success or create duplicate ledger rows. Reference transport isolation now also applies to RapidAPI.
+
+The original bug was reproduced with a failing regression before the fix. Six additional regression groups cover monthly exhaustion, provider quota blocks, successful same-run backup validation with a single ledger entry, fair rotation and handoff back to SerpApi, backup caps and duplicate prevention, failure to persist a fallback schedule, and isolated reference failure. All existing tests and 36 regression groups now pass. September validation replay, basket math, item count, 95% threshold and SerpApi budget projections are unchanged. This follow-up does not establish that RapidAPI is configured in the deployed app; private properties remain uninspected. No live collection, merge or deployment was performed.

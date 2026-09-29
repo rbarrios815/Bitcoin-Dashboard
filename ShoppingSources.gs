@@ -1,13 +1,18 @@
 function fetchShoppingCandidates_(items, props, onSchedule) {
   const byId = {__outcomes:{}};
   items.forEach(function(item){ byId[item.id] = []; });
-  let scheduledItems = items;
+  const now=new Date(),day=serpApiCalendarKeys_(now).day;
+  // A completed/reserved backup run is also a daily collection, even if the primary
+  // becomes available later that day. Never create an unlogged retry opportunity.
+  if(PropertiesService.getScriptProperties().getProperty('RAPIDAPI_LAST_SEARCH_DATE')===day)return byId;
+  const plan=props.serpApiKey?planSerpApiRequests_(items,props,now):{items:[],reason:'not_configured'};
+  const serpItems=plan.items;
+  const rapidEnabled=props.rapidApiKey&&props.priceApiSearchUrl&&props.priceApiHost;
+  const rapidItems=rapidEnabled?planRapidApiRequests_(items,props,now,plan):[];
+  const scheduled=serpItems.length?serpItems:rapidItems;
+  // Both providers contribute to the same item/day outcome, never two denominators.
+  if(scheduled.length&&onSchedule)onSchedule(scheduled,serpItems.length?(rapidItems.length?'serpapi+rapidapi':'serpapi'):'rapidapi');
   if (props.serpApiKey) {
-    const now = new Date();
-    const plan = planSerpApiRequests_(items, props, now);
-    const serpItems = plan.items;
-    scheduledItems=serpItems;
-    if(onSchedule)onSchedule(serpItems,'serpapi');
     const requests = serpItems.map(function(item) {
       let url = 'https://serpapi.com/search.json?engine=' + encodeURIComponent(props.serpApiEngine || 'google_shopping') + '&q=' + encodeURIComponent(item.query) + '&api_key=' + encodeURIComponent(props.serpApiKey) + '&num=20';
       if (props.serpApiLocation) url += '&location=' + encodeURIComponent(props.serpApiLocation);
@@ -31,20 +36,18 @@ function fetchShoppingCandidates_(items, props, onSchedule) {
       });
     });
   }
-  if (props.rapidApiKey && props.priceApiSearchUrl && props.priceApiHost) {
-    if(!props.serpApiKey){
-      const sp=PropertiesService.getScriptProperties(),day=serpApiCalendarKeys_(new Date()).day;
-      if(sp.getProperty('RAPIDAPI_LAST_SEARCH_DATE')===day)scheduledItems=[];
-      else sp.setProperty('RAPIDAPI_LAST_SEARCH_DATE',day);
-      if(onSchedule)onSchedule(scheduledItems,'rapidapi');
-    }
+  if (rapidEnabled) {
+    const scheduledItems=rapidItems;
     const requests = scheduledItems.map(function(item) {
       let url = addQuery_(props.priceApiSearchUrl,'product_title',item.query);
       if (props.countryCode) url = addQuery_(url,'country_code',props.countryCode);
       if (props.excludeDomains) url = addQuery_(url,'exclude_domains',props.excludeDomains);
       return {url:url,muteHttpExceptions:true,headers:{'X-RapidAPI-Key':props.rapidApiKey,'X-RapidAPI-Host':props.priceApiHost}};
     });
-    safeFetchAll_(requests,function(){scheduledItems.forEach(function(item){byId.__outcomes[item.id]='rapidapi_transport_error';});}).forEach(function(response,i) {
+    [true,false].forEach(function(coreBatch){
+      const indexes=scheduledItems.map(function(item,i){return isCoreItem_(item)===coreBatch?i:-1;}).filter(function(i){return i>=0;});
+      safeFetchAll_(indexes.map(function(i){return requests[i];}),function(){indexes.forEach(function(i){byId.__outcomes[scheduledItems[i].id]='rapidapi_transport_error';});}).forEach(function(response,batchIndex) {
+      const i=indexes[batchIndex];
       try {
         if (response.getResponseCode() !== 200){byId.__outcomes[scheduledItems[i].id]='rapidapi_http_'+response.getResponseCode();return;}
         const data = JSON.parse(response.getContentText() || '{}');
@@ -52,9 +55,35 @@ function fetchShoppingCandidates_(items, props, onSchedule) {
         byId.__outcomes[scheduledItems[i].id]=rows.length?'candidates_received':'empty_results';
         rows.slice(0,20).forEach(function(x){ byId[scheduledItems[i].id].push({provider:'rapidapi',title:String(x.title || x.name || x.description || ''),price:numberFrom_(x.price || x.min_price || x.lowest_price || x.sale_price),vendor:String(x.source || x.seller || x.merchant || x.store || ''),url:String(x.product_url || x.url || x.link || '')}); });
       } catch (e) {byId.__outcomes[scheduledItems[i].id]='rapidapi_invalid_response';}
+      });
     });
   }
   return byId;
+}
+
+// Continue the shared item rotation when SerpAPI cannot reserve requests. RapidAPI
+// has its own daily reservation; its calls never consume the SerpAPI monthly budget.
+function planRapidApiRequests_(items,props,now,primaryPlan){
+  const sp=PropertiesService.getScriptProperties(),keys=serpApiCalendarKeys_(now);
+  if(sp.getProperty('RAPIDAPI_LAST_SEARCH_DATE')===keys.day||primaryPlan.reason==='already_searched_today')return[];
+  const cap=props.rapidApiMaxSearchesPerDay===undefined?8:props.rapidApiMaxSearchesPerDay;
+  let selected=primaryPlan.items.slice(0,cap);
+  if(!primaryPlan.items.length){
+    const core=items.filter(isCoreItem_),references=items.filter(function(item){return !isCoreItem_(item);});
+    const count=Math.min(core.length,cap,props.serpApiCoreSearchesPerDay===undefined?6:props.serpApiCoreSearchesPerDay);
+    const cursor=Number(sp.getProperty('SERPAPI_CORE_CURSOR')||0);
+    for(let i=0;i<count;i++)selected.push(core[(cursor+i)%core.length]);
+    const refDay=sp.getProperty('SERPAPI_REFERENCE_DAY');
+    const due=refDay===null||keys.dayNumber-Number(refDay)>=(props.serpApiReferenceIntervalDays||7);
+    const refCount=due?Math.min(references.length,Math.max(0,cap-count)):0;
+    const refCursor=Number(sp.getProperty('SERPAPI_REFERENCE_CURSOR')||0);
+    for(let i=0;i<refCount;i++)selected.push(references[(refCursor+i)%references.length]);
+    sp.setProperty('SERPAPI_CORE_CURSOR',String(cursor+count));
+    sp.setProperty('SERPAPI_REFERENCE_CURSOR',String(refCursor+refCount));
+    if(refCount)sp.setProperty('SERPAPI_REFERENCE_DAY',String(keys.dayNumber));
+  }
+  if(selected.length)sp.setProperty('RAPIDAPI_LAST_SEARCH_DATE',keys.day);
+  return selected;
 }
 
 function aggregateCandidates_(item, candidates, btcUsd, ts, rawOffers) {

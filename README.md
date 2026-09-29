@@ -29,6 +29,8 @@ The default basket remains **10 groceries**. Onions and salt remain inactive. Go
 
 Run `getSerpApiBudgetStatus()` to inspect local reservations. External account usage is not visible to that counter.
 
+When RapidAPI is already configured, it remains available after SerpApi budget exhaustion or a quota block. Both providers normally serve the same scheduled item/day opportunity. If SerpApi cannot schedule, RapidAPI continues the shared grocery/reference rotation with its own once-daily reservation and `RAPIDAPI_MAX_SEARCHES_PER_DAY=8` cap (set `0` to disable its requests). Backup calls do not spend the SerpApi budget; any RapidAPI charges belong to its separately configured provider plan. The ledger is written once before either provider runs, so a successful backup validation cannot add a second denominator or erase an earlier day's failure. Neither provider repeats a completed/reserved daily run.
+
 ## Reliability grade
 
 The collector creates `RefreshSchedule` (override with `REFRESH_LOG_SHEET_NAME`) and flushes one durable row per scheduled item/day **before** issuing provider requests. Pending/crashed, empty, failed, or rejected grocery requests remain denominator entries; only successful fresh validated results count in the numerator. Gold and silver never enter either total. Raw-offer count is not a request ledger.

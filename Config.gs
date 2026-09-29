@@ -2,6 +2,7 @@ function getProps_(){
   const sp=PropertiesService.getScriptProperties();
   const key=function(a,b,c){return [a,b,c].filter(Boolean).join('_');};
   return {
+    rapidApiMaxSearchesPerDay:integerProp_(sp,'RAPIDAPI_MAX_SEARCHES_PER_DAY',8,0),
     rapidApiKey:sp.getProperty(key('RAPIDAPI','KEY'))||'',
     priceApiHost:sp.getProperty(key('PRICE','API','HOST'))||'',
     priceApiSearchUrl:sp.getProperty(key('PRICE','API','SEARCH_URL'))||'',

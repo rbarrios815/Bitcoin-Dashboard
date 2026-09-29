@@ -88,6 +88,83 @@ test('Empty, HTTP and malformed responses remain distinguishable failed opportun
     assert.equal(result.apples.length,0);assert.equal(result.__outcomes.apples,reason);
   }
 });
+// Review regression: the configured backup must survive an exhausted primary provider.
+test('RapidAPI continues grocery refreshes after SerpAPI monthly exhaustion',()=>{
+  Object.keys(props).forEach(k=>delete props[k]);
+  const today=context.serpApiCalendarKeys_(new Date());
+  props.SERPAPI_USAGE_MONTH=today.month;props.SERPAPI_USAGE_COUNT='220';
+  const schedules=[],calls=[];
+  context.UrlFetchApp={fetchAll(requests){calls.push(...requests);assert.ok(schedules.length,'fallback must be logged before requests');return requests.map(()=>({getResponseCode:()=>200,getContentText:()=>JSON.stringify({products:[{title:'Honeycrisp Apples 3 lb',price:6,source:'Store'}]})}));}};
+  const config={serpApiKey:'test',serpApiMonthlyBudget:220,serpApiMaxSearchesPerDay:8,serpApiCoreSearchesPerDay:6,rapidApiKey:'test',priceApiHost:'example.com',priceApiSearchUrl:'https://example.com/search'};
+  const result=context.fetchShoppingCandidates_(all,config,(items,provider)=>{if(items.length)schedules.push({items,provider});});
+  assert.ok(result.apples.length>0,'configured RapidAPI must work after SerpAPI quota exhaustion');
+  assert.equal(calls.filter(r=>r.url.startsWith('https://serpapi.com')).length,0);
+  assert.equal(props.SERPAPI_USAGE_COUNT,'220');
+  assert.equal(schedules.length,1);assert.equal(schedules[0].provider,'rapidapi');
+  assert.equal(schedules[0].items.filter(context.isCoreItem_).length,6);
+  const before=calls.length;
+  context.fetchShoppingCandidates_(all,config,()=>{throw Error('same-day duplicate schedule');});
+  assert.equal(calls.length,before);
+});
+const dualConfig={serpApiKey:'test',serpApiMonthlyBudget:220,serpApiMaxSearchesPerDay:8,serpApiCoreSearchesPerDay:6,rapidApiKey:'test',priceApiHost:'example.com',priceApiSearchUrl:'https://example.com/search'};
+function successfulBackupResponse(request){
+  const query=new URL(request.url).searchParams.get('product_title');
+  const item=all.find(x=>x.query===query);
+  return{getResponseCode:()=>200,getContentText:()=>JSON.stringify({products:[{title:query,price:item.quantity*(item.bounds[0]+item.bounds[1])/2,source:'Store'}]})};
+}
+function scheduleHarness(){
+  const sheet=fakeSheet();sheet.cells.push(['day','item_id','provider','status','scheduled_at','completed_at','reason','methodology','core_ids']);
+  let entries=[],callbacks=0;
+  context.SpreadsheetApp={flush(){}};
+  return{sheet,get entries(){return entries;},get callbacks(){return callbacks;},schedule(items,provider){callbacks++;entries=context.beginRefreshSchedule_(sheet,items,core,provider,new Date());}};
+}
+test('Blocked SerpAPI month still logs and validates six fallback grocery opportunities',()=>{
+  Object.keys(props).forEach(k=>delete props[k]);
+  const today=context.serpApiCalendarKeys_(new Date()),h=scheduleHarness();
+  props.SERPAPI_USAGE_MONTH=today.month;props.SERPAPI_USAGE_COUNT='80';props.SERPAPI_BLOCKED_MONTH=today.month;
+  context.UrlFetchApp={fetchAll(requests){assert.ok(h.entries.length>0);assert.ok(requests.every(r=>!r.url.includes('serpapi.com')));return requests.map(successfulBackupResponse);}};
+  const results=context.fetchShoppingCandidates_(all,dualConfig,h.schedule);
+  const validated=all.map(item=>context.aggregateCandidates_(item,results[item.id],84000,new Date(),[]));
+  context.finishRefreshSchedule_(h.sheet,h.entries,validated,new Date());
+  const log=context.readRefreshSchedule_(h.sheet).filter(r=>ids.includes(r.itemId));
+  assert.equal(h.callbacks,1);assert.equal(log.length,6);assert.ok(log.every(r=>r.status==='success'));assert.equal(props.SERPAPI_USAGE_COUNT,'80');
+});
+test('Same-run quota failure can be rescued by backup without a second denominator',()=>{
+  Object.keys(props).forEach(k=>delete props[k]);const h=scheduleHarness();let primary=0,backup=0;
+  context.UrlFetchApp={fetchAll(requests){assert.ok(h.entries.length>0);return requests.map(r=>{if(r.url.includes('serpapi.com')){primary++;return{getResponseCode:()=>429,getContentText:()=>''};}backup++;return successfulBackupResponse(r);});}};
+  const results=context.fetchShoppingCandidates_(all,dualConfig,h.schedule);
+  context.finishRefreshSchedule_(h.sheet,h.entries,all.map(item=>context.aggregateCandidates_(item,results[item.id],84000,new Date(),[])),new Date());
+  const log=context.readRefreshSchedule_(h.sheet).filter(r=>ids.includes(r.itemId));
+  assert.equal(primary,8);assert.equal(backup,8);assert.equal(h.callbacks,1);assert.equal(log.length,6);assert.ok(log.every(r=>r.status==='success'));assert.equal(h.sheet.cells[1][2],'serpapi+rapidapi');
+  context.fetchShoppingCandidates_(all,dualConfig,()=>{throw Error('duplicate ledger');});assert.equal(primary,8);assert.equal(backup,8);
+});
+test('Fallback rotates fairly, caps daily use, and hands its cursor back to SerpAPI',()=>{
+  Object.keys(props).forEach(k=>delete props[k]);const empty={items:[],reason:'provider_quota_exhausted'};let previous=[],refCalls=0;
+  for(let day=1;day<=8;day++){
+    const date=new Date(`2026-09-${String(day).padStart(2,'0')}T14:00Z`);
+    const items=context.planRapidApiRequests_(all,dualConfig,date,empty),today=items.filter(context.isCoreItem_).map(i=>i.id);
+    assert.equal(today.length,6);assert.ok(items.length<=8);if(day>1)assert.equal(new Set(previous.concat(today)).size,10);previous=today;refCalls+=items.length-today.length;
+    assert.equal(context.planRapidApiRequests_(all,dualConfig,date,empty).length,0);
+  }
+  assert.equal(refCalls,4);assert.equal(props.SERPAPI_USAGE_COUNT,undefined);
+  const cursor=Number(props.SERPAPI_CORE_CURSOR);
+  const recovered=context.planSerpApiRequests_(all,dualConfig,new Date('2026-09-09T14:00Z'));
+  assert.equal(recovered.items[0].id,ids[cursor%ids.length]);
+  const capped=context.planRapidApiRequests_(all,{...dualConfig,rapidApiMaxSearchesPerDay:4},new Date('2026-09-10T14:00Z'),empty);assert.equal(capped.length,4);assert.ok(capped.every(context.isCoreItem_));
+  assert.equal(context.planRapidApiRequests_(all,{...dualConfig,rapidApiMaxSearchesPerDay:0},new Date('2026-09-11T14:00Z'),empty).length,0);
+});
+test('Fallback persistence failure prevents all backup requests',()=>{
+  Object.keys(props).forEach(k=>delete props[k]);let calls=0;
+  context.UrlFetchApp={fetchAll(){calls++;return[];}};
+  assert.throws(()=>context.fetchShoppingCandidates_(all,{...dualConfig,serpApiMonthlyBudget:0},()=>{throw Error('Sheet unavailable');}));assert.equal(calls,0);
+});
+test('RapidAPI reference transport failure cannot discard valid grocery offers',()=>{
+  Object.keys(props).forEach(k=>delete props[k]);
+  context.UrlFetchApp={fetchAll(requests){if(requests.every(r=>/gold|silver/.test(decodeURIComponent(r.url))))throw Error('metal transport failure');return requests.map(successfulBackupResponse);}};
+  const results=context.fetchShoppingCandidates_(all,{...dualConfig,serpApiKey:''},()=>{});
+  assert.ok(context.aggregateCandidates_(core[0],results.apples,84000,new Date(),[]).valid);assert.equal(results.__outcomes.gold,'rapidapi_transport_error');
+  assert.equal(props.SERPAPI_USAGE_COUNT,undefined);
+});
 JSON.parse(fs.readFileSync('appsscript.json','utf8'));
 for(const f of ['App.html','Index.html'])for(const match of fs.readFileSync(f,'utf8').matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g))new vm.Script(match[1],{filename:f});
 console.log(`${count} new regression tests passed; all existing tests and syntax/manifest checks passed.`);
