@@ -14,6 +14,14 @@ It also reports basket composition, item-level changes, carried-forward values, 
 
 **This repository does not mine Bitcoin.**
 
+## Reading the dashboard
+
+The first result answers whether the same amount of Bitcoin buys more or fewer groceries between the displayed dates. The percentage is the change in purchasing power (baseline basket sats divided by latest basket sats, minus one), not the percentage change in basket cost. For example, a basket falling from 53,000 to 42,400 sats means 25% more groceries, although its sats cost fell 20%.
+
+The latest snapshot must contain the same complete set of configured grocery identities as the baseline. Missing or invalid prices withhold the comparison rather than silently substituting an older complete snapshot. At least two complete observations are required. Carried-forward prices at either boundary, or a latest snapshot over 48 hours old, mark the result provisional. The chart starts in sats; its separate dollar index remains explicitly labeled. Reliability accounting is unchanged.
+
+Run the focused frontend regression with `node tests/test_purchasing_power_answer.js`. It checks the actual summary renderer as well as comparison arithmetic, missing values, basket identity and provisional states.
+
 ## SerpApi query budget
 
 The daily collector refreshes a rotating subset of shopping items so a 250-search monthly plan lasts the full month. Defaults:
