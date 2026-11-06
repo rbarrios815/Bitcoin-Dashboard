@@ -1,6 +1,6 @@
 <script>
   const $=id=>document.getElementById(id);
-  const state={data:null,range:'all',view:'basket',item:null,stale:'include',unit:'usd',charts:{}};
+  const state={data:null,range:'all',view:'basket',item:null,stale:'include',unit:'sats',charts:{}};
   const COLORS=['#f7931a','#5fd4ff','#39d98a','#ffd166','#ff6b7a','#9d8cff','#5ce1c7','#ff9e64','#72a7ff','#d6a7ff'];
 
   function appCall(name,...args){return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[name](...args));}
@@ -26,7 +26,25 @@
       return {...s,items:fresh,basketUsd,basketSats,freshCount:fresh.length,staleCount:0,missingCount:Math.max(0,expected-fresh.length)};
     });
   }
-  function usableBoundaries(rows,field){const valid=rows.filter(x=>Number.isFinite(Number(x[field])));return valid.length?{first:valid[0],last:valid[valid.length-1]}:null;}
+  function positiveValue(value){return value!==null&&value!==undefined&&typeof value!=='boolean'&&String(value).trim()!==''&&Number.isFinite(Number(value))&&Number(value)>0;}
+  function usableBoundaries(rows,field){const valid=rows.filter(x=>positiveValue(x[field]));return valid.length?{first:valid[0],last:valid[valid.length-1]}:null;}
+  function basketAnswer(rows,definition,now=Date.now()){
+    const expected=Number(definition?.itemCount||0),ids=(definition?.items||[]).map(x=>x.id).sort();
+    const ordered=rows.filter(x=>Number.isFinite(new Date(x.ts).getTime())&&new Date(x.ts).getTime()<=now).slice().sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+    if(!ordered.length||!expected||ids.length!==expected||new Set(ids).size!==expected)return {status:'empty'};
+    const complete=row=>{
+      const valid=(row.items||[]).filter(x=>x.valid&&positiveValue(x.usd)&&positiveValue(x.sats));
+      return positiveValue(row.basketUsd)&&positiveValue(row.basketSats)&&positiveValue(row.btcUsd)&&Number(row.missingCount)===0&&valid.length===expected&&JSON.stringify(valid.map(x=>x.itemId).sort())===JSON.stringify(ids);
+    };
+    const last=ordered[ordered.length-1];
+    if(!complete(last))return {status:'incomplete',last};
+    const first=ordered.find(complete);
+    if(!first||new Date(first.ts).getTime()===new Date(last.ts).getTime())return {status:'insufficient',last};
+    const change=(Number(first.basketSats)/Number(last.basketSats)-1)*100;
+    const carried=[first,last].some(x=>Number(x.staleCount)>0||(x.items||[]).some(i=>i.isStale));
+    const outdated=now-new Date(last.ts).getTime()>48*60*60*1000;
+    return {status:'ready',first,last,change,carried,outdated,provisional:carried||outdated};
+  }
   function itemData(){return (state.data?.itemSeries||[]).find(x=>x.id===state.item)||null;}
   function filteredItemHistory(){const item=itemData(),start=rangeStart();return (item?.history||[]).filter(x=>(!start||new Date(x.ts)>=start)&&(state.stale==='include'||!x.isStale));}
 
@@ -47,15 +65,19 @@
       $('insight').textContent=item.name+' changed '+pctText(u)+' in dollars and '+pctText(s)+' in sats over this range. '+(s<0?'Bitcoin purchasing power improved against this item.':s>0?'Bitcoin purchasing power declined against this item.':'The sats price was unchanged.');
       return;
     }
-    const rows=filteredSnapshots(),bounds=usableBoundaries(rows,'basketUsd');
-    if(!bounds){hero.innerHTML='<div class="card metric"><div class="empty">No complete basket observations in this range.</div></div>';$('insight').textContent='Include carried-forward values or choose a wider range.';return;}
-    const first=bounds.first,last=bounds.last,usdChange=pct(first.basketUsd,last.basketUsd),satsChange=pct(first.basketSats,last.basketSats),firstShare=10000/first.basketSats*100,lastShare=10000/last.basketSats*100,shareChange=pct(firstShare,lastShare),reliability=state.data.reliability||{},currentItems=Number(reliability.currentItems||0),expectedItems=Number(reliability.expectedItems||state.data.basketDefinition.itemCount||0),currentPct=Number(reliability.currentCoveragePct||0);
-    hero.innerHTML=metric('10,000 sats buys',lastShare.toFixed(2)+'%',pctText(shareChange)+' basket share',shareChange>=0?'good':'bad','primary')+metric('Fixed basket in dollars',money(last.basketUsd),pctText(usdChange)+' vs baseline',usdChange<=0?'good':'bad')+metric('Fixed basket in sats',sats(last.basketSats),pctText(satsChange)+' · lower is better',satsChange<=0?'good':'bad')+`<div class="card metric"><div class="label">Current basket coverage</div><div class="value">${currentItems}/${expectedItems}</div><div class="delta ${currentPct===100?'good':currentPct>=80?'neutral':'bad'}">${currentPct.toFixed(0)}% within 48 hours</div><div class="detail">${Number(reliability.outdatedItems||0)} older · ${Number(reliability.missingItems||0)} missing</div></div>`;
-    let message=`From ${dateText(first.ts)} to ${dateText(last.ts)}, the basket changed ${pctText(usdChange)} in dollars and ${pctText(satsChange)} in sats. `;
-    message+=satsChange<0?'Bitcoin outpaced the basket over this period, so purchasing power improved.':satsChange>0?'The basket outpaced Bitcoin over this period, so purchasing power declined.':'Bitcoin purchasing power was flat against this basket.';
-    if(reliability.grade==='Building')message+=` Reliability tracking is building: ${Math.min(Number(reliability.trackingDays||0),30)}/30 days.`;
-    else message+=` The rolling 30-day reliability grade is ${reliability.grade||'F'}.`;
-    $('insight').textContent=message;
+    const answer=basketAnswer(filteredSnapshots(),state.data.basketDefinition);
+    if(answer.status!=='ready'){
+      const title=answer.status==='incomplete'?'Latest basket is incomplete':answer.status==='insufficient'?'One complete observation so far':'No comparable basket history';
+      const detail=answer.status==='incomplete'?'The latest observation cannot price every fixed package. No more-or-fewer claim is shown.':'At least two complete observations of the same basket are needed.';
+      hero.innerHTML=metric('Does Bitcoin buy more groceries?',title,detail,'neutral','answer');
+      $('insight').textContent='Choose a wider range or include carried-forward values to inspect available history. Missing packages never count as a cheaper basket.';return;
+    }
+    const {first,last,change,provisional}=answer,lastShare=10000/last.basketSats*100,firstShare=10000/first.basketSats*100;
+    const unchanged=Math.abs(change)<0.005,headline=unchanged?'Bitcoin buys the same groceries':`Bitcoin buys ${Math.abs(change).toFixed(2)}% ${change>0?'more':'fewer'} groceries`;
+    const qualifier=provisional?'Provisional comparison':'Compared with the start of this range';
+    const reasons=[answer.carried?'a boundary uses carried-forward grocery prices':'',answer.outdated?'the latest snapshot is over 48 hours old':''].filter(Boolean);
+    hero.innerHTML=metric(qualifier,headline,`${dateText(first.ts)} → ${dateText(last.ts)} · same ${state.data.basketDefinition.itemCount} packages`,provisional?'neutral':unchanged?'neutral':change>0?'good':'bad','answer')+metric('10,000 sats buys',lastShare.toFixed(2)+'% of a basket','Previously '+firstShare.toFixed(2)+'% of the same basket','neutral')+metric('Basket price in dollars',money(last.basketUsd),pctText(pct(first.basketUsd,last.basketUsd))+' over this range','neutral')+metric('Basket price in sats',sats(last.basketSats),pctText(pct(first.basketSats,last.basketSats))+' over this range','neutral');
+    $('insight').textContent=(reasons.length?'Provisional: '+reasons.join('; ')+'. ':'')+'A satoshi (sat) is a unit of Bitcoin. Holding the same number of sats now buys '+(unchanged?'the same amount':Math.abs(change).toFixed(2)+'% '+(change>0?'more':'fewer')+' groceries')+' against this measured basket. This is a historical comparison, not a forecast.';
   }
   function metric(label,value,delta,cls,extra=''){return `<div class="card metric ${extra}"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div><div class="delta ${cls}">${escapeHtml(delta)}</div></div>`;}
 
