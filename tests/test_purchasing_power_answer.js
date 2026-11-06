@@ -32,6 +32,8 @@ const base = snapshot(29,53000);
 const latest = snapshot(0,42400);
 const answer = rows => call('basketAnswer', rows, definition, now);
 assert.equal(answer([base,latest]).change,25);
+assert.equal(answer([base,latest]).dollarChange,0,'Unchanged USD basket means unchanged dollar buying power');
+assert.equal(answer([base,snapshot(0,42400,{basketUsd:58.3})]).dollarChange.toFixed(4),'-9.0909','Dollar purchasing power uses inverse basket cost');
 assert.equal(answer([base,snapshot(0,58300)]).change.toFixed(4),'-9.0909');
 assert.equal(answer([base,snapshot(0,53000)]).change,0);
 assert.equal(answer([latest,base]).change,25, 'Sort before comparing');
@@ -57,6 +59,8 @@ function render(rows) {
   return elements.hero.innerHTML;
 }
 assert.match(render([base,latest]),/Bitcoin buys 25.00% more groceries/);
+assert.match(elements.hero.innerHTML,/Dollars buy the same groceries/);
+assert.match(render([base,snapshot(0,42400,{basketUsd:58.3})]),/Dollars buy 9.09% fewer groceries/);
 assert.match(render([base,snapshot(0,58300)]),/Bitcoin buys 9.09% fewer groceries/);
 assert.match(render([base,snapshot(0,53000)]),/Bitcoin buys the same groceries/);
 assert.match(render([base,snapshot(0,42400,{staleCount:1})]),/Provisional comparison/);
