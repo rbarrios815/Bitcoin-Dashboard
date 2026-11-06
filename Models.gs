@@ -121,7 +121,7 @@ function historyRow_(row,h) {
 }
 
 function historyValues_(ts,btc,row,basketUsd,basketSats){return [ts,btc,row.itemId,row.name,row.query,row.query,row.description,row.title||'',row.title||'',row.usd||0,row.sats||0,row.normalizedPrice||'',row.unit||'',basketUsd||0,basketSats||0,row.source||'',row.vendor||'',row.sourceUrl||'',Boolean(row.isStale),row.score||'',row.status||'',row.failReason||'',row.matchedCount||0,row.usedCount||0,row.method||'',row.vendors||'',row.urls||'',row.scores||'',row.prices||'',Boolean(row.multi)];}
-function rawValues_(ts,row){return [ts,row.itemId,row.vendor,row.title,row.rawPrice,row.parsedQuantity||'',row.parsedUnit||'',row.normalizedPrice||'',row.unit||'',row.pass?'pass':'fail',row.failReason,row.score,row.url,row.provider,Boolean(row.selected)];}
+function rawValues_(ts,row){return [ts,row.itemId,row.vendor,row.title,row.rawPrice,row.parsedQuantity||'',row.parsedUnit||'',row.normalizedPrice||'',row.unit||'',row.pass?'pass':'fail',row.failReason,row.score,row.url,row.provider,Boolean(row.selected),JSON.stringify(row.sizeEvidence||[]),row.sizeSource||'title','3'];}
 
 function lastValidatedRows_(sheet){
   const values=sheet.getDataRange().getValues(); if(values.length<2)return{};
@@ -129,3 +129,4 @@ function lastValidatedRows_(sheet){
   for(let i=values.length-1;i>=1;i--){const row=historyRow_(values[i],h);if(out[row.itemId]||!finitePositive_(row.usd)||String(row.status).toLowerCase()!=='validated')continue;out[row.itemId]=row;}
   return out;
 }
+

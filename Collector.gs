@@ -7,6 +7,8 @@ function recordSnapshot() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const historySheet = ensureSheet_(ss, props.dataSheetName, HISTORY_HEADER);
     const rawSheet = ensureSheet_(ss, props.rawOffersSheetName, RAW_HEADER);
+    const refreshSheet = ensureSheet_(ss, props.refreshLogSheetName, REFRESH_HEADER);
+    let scheduledEntries = [];
     const active = getActiveCatalog_(props);
     const btcUsd = fetchBtcUsd_(props);
     const ts = new Date();
@@ -15,7 +17,9 @@ function recordSnapshot() {
     const results = [];
 
     const shoppingItems = active.filter(function(item){ return item.id !== 'mwh' && item.id !== 'cash10' && item.id !== 'sats10000'; });
-    const providerResults = fetchShoppingCandidates_(shoppingItems, props);
+    const providerResults = fetchShoppingCandidates_(shoppingItems, props, function(items,provider){
+      scheduledEntries=beginRefreshSchedule_(refreshSheet,items,active.filter(isCoreItem_),provider,ts);
+    });
 
     active.forEach(function(item) {
       if (item.id === 'cash10' || item.id === 'sats10000') return;
@@ -28,8 +32,10 @@ function recordSnapshot() {
         result = aggregateCandidates_(item, candidates, btcUsd, ts, rawOffers);
       }
       if (!result || !result.valid) {
+        const failureReason=(providerResults.__outcomes&&providerResults.__outcomes[item.id]||'not_scheduled')+';'+(result&&result.failReason||'no_valid_candidates');
         const old = prior[item.id];
         result = old && props.allowStaleFallback ? carriedResult_(item, old.usd, btcUsd, ts, old) : rejectedResult_(item, btcUsd, ts, result ? result.failReason : 'no_valid_candidates');
+        result.failReason=failureReason+(result.isStale&&result.valid?';carried_forward':'');
       }
       results.push(result);
     });
@@ -40,9 +46,11 @@ function recordSnapshot() {
     const rows = results.map(function(row){ return historyValues_(ts, btcUsd, row, basketUsd, basketSats); });
     if (rows.length) historySheet.getRange(historySheet.getLastRow()+1,1,rows.length,HISTORY_HEADER.length).setValues(rows);
     if (rawOffers.length) rawSheet.getRange(rawSheet.getLastRow()+1,1,rawOffers.length,RAW_HEADER.length).setValues(rawOffers.map(function(row){ return rawValues_(ts,row); }));
+    finishRefreshSchedule_(refreshSheet,scheduledEntries,results,new Date());
     CacheService.getScriptCache().remove('PP_DASHBOARD_V2');
     return {ok:true,recordedAt:ts.toISOString(),rowsAppended:rows.length,rawOffersAppended:rawOffers.length};
   } finally {
     lock.releaseLock();
   }
 }
+

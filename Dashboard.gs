@@ -48,7 +48,9 @@ function getPurchasingPowerDashboardData() {
 
   const referenceSeries = buildReferenceSeries_(Object.keys(grouped).sort(), grouped, references);
   const latest = snapshots.length ? snapshots[snapshots.length - 1] : null;
-  const reliability = buildReliability_(snapshots,itemSeries,core.length,props.serpApiMaxSearchesPerDay,new Date(),props.reliabilityStartDate);
+  const reliability = scheduledReliability_(snapshots,itemSeries,core.map(function(item){return item.id;}),readRefreshSchedule_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(props.refreshLogSheetName)),new Date());
+  // Retain the old view explicitly for comparison; never rewrite historical observations.
+  const legacyReliability = buildReliability_(snapshots,itemSeries,core.length,props.legacyReliabilitySearchesPerDay,new Date(),props.reliabilityStartDate);
   return {
     version:PP_VERSION,
     generatedAt:new Date().toISOString(),
@@ -58,6 +60,8 @@ function getPurchasingPowerDashboardData() {
     itemSeries:itemSeries,
     references:referenceSeries,
     quality:latest ? latest.quality : emptyQuality_(core.length),
-    reliability:reliability
+    reliability:reliability,
+    legacyReliability:legacyReliability
   };
 }
+

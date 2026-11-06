@@ -101,11 +101,11 @@
 
   function renderQuality(){
     const r=state.data.reliability||{},grade=String(r.grade||'Building'),success=Number(r.refreshSuccessPct||0),tracked=Math.min(Number(r.trackingDays||0),Number(r.requiredTrackingDays||30)),required=Number(r.requiredTrackingDays||30);
-    $('quality').innerHTML=`<div class="q"><span>Current ≤48h</span><b class="good">${Number(r.currentItems||0)}/${Number(r.expectedItems||0)}</b></div><div class="q"><span>Older</span><b class="neutral">${Number(r.outdatedItems||0)}</b></div><div class="q"><span>Missing</span><b class="bad">${Number(r.missingItems||0)}</b></div><div class="q"><span>30-day success</span><b>${Number(r.expectedRefreshes||0)?success.toFixed(1)+'%':'—'}</b></div><div class="q"><span>Track record</span><b>${tracked}/${required} days</b></div><div class="q"><span>Reliability grade</span><b class="${grade==='A'||grade==='B'?'good':'neutral'}">${escapeHtml(grade)}</b></div>`;
-    if(!Number(r.trackingDays||0))$('qualityWarning').textContent=`Thirty-day reliability tracking begins ${r.trackingStartDate||'when the new collection cycle starts'}.`;
-    else if(!r.mature)$('qualityWarning').textContent=`Building the 30-day track record. An A requires 12/12 items within 48 hours, no missing items, and at least 95% scheduled-refresh success.`;
+    $('quality').innerHTML=`<div class="q"><span>Current ≤48h</span><b class="good">${Number(r.currentItems||0)}/${Number(r.expectedItems||0)}</b></div><div class="q"><span>Older</span><b class="neutral">${Number(r.outdatedItems||0)}</b></div><div class="q"><span>Missing</span><b class="bad">${Number(r.missingItems||0)}</b></div><div class="q"><span>30-day success</span><b>${Number(r.expectedRefreshes||0)?success.toFixed(1)+'%':'—'} (${Number(r.successfulRefreshes||0)}/${Number(r.expectedRefreshes||0)})</b></div><div class="q"><span>Track record</span><b>${tracked}/${required} days</b></div><div class="q"><span>Reliability grade</span><b class="${grade==='A'||grade==='B'?'good':'neutral'}">${escapeHtml(grade)}</b></div>`;
+    if(!Number(r.trackingDays||0))$('qualityWarning').textContent=`Thirty-day reliability tracking begins ${r.trackingStartDate||'on the first logged grocery schedule (methodology v3)'}.`;
+    else if(!r.mature)$('qualityWarning').textContent=`Building the 30-day track record. An A requires ${Number(r.expectedItems||0)}/${Number(r.expectedItems||0)} items within 48 hours, no missing items, and at least 95% scheduled-refresh success.`;
     else if(grade==='A')$('qualityWarning').textContent='A earned: the basket is fully current and the last 30 days met the 95% scheduled-refresh standard.';
-    else $('qualityWarning').textContent=`An A requires 12/12 items within 48 hours, no missing items, and at least 95% scheduled-refresh success. Current success: ${success.toFixed(1)}%.`;
+    else $('qualityWarning').textContent=`${r.scheduleComplete?'':'Incomplete schedule coverage. '}An A requires ${Number(r.expectedItems||0)}/${Number(r.expectedItems||0)} items within 48 hours, no missing items, and at least 95% scheduled-refresh success. Current success: ${success.toFixed(1)}%.`;
   }
 
   function renderReferences(){
