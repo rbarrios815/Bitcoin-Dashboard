@@ -1,0 +1,60 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const el={textContent:'',appendChild(){}};
+const context=vm.createContext({console,document:{getElementById:()=>el,createElement:()=>({})}});
+const js=fs.readFileSync('App.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1].replace('wire();load();','');
+vm.runInContext(js,context);
+vm.runInContext(fs.readFileSync('FoodBenchmark.gs','utf8'),context);
+context.finitePositive_=v=>Number.isFinite(Number(v))&&Number(v)>0;
+function call(name,...args){context.args=args;return vm.runInContext(name+'(...args)',context);}
+const now=new Date('2026-11-06T01:00Z');
+const benchmark={points:[{month:'2026-08',cpi:100},{month:'2026-09',cpi:125}]};
+function month(y,m,btc){return Array.from({length:new Date(Date.UTC(y,m,0)).getUTCDate()},(_,i)=>({ts:new Date(Date.UTC(y,m-1,i+1,8)).toISOString(),btcUsd:btc}));}
+const samples=[...month(2026,8,100000),...month(2026,9,156250)];
+const evidence=(rows=samples,b=benchmark,start=null)=>call('foodEvidence',b,rows,start,now);
+assert.equal(evidence().btcChange,25,'20% lower CPI/BTC cost gives 25% more food');
+assert.ok(Math.abs(evidence().dollarChange+20)<1e-10);
+assert.equal(evidence([...month(2026,8,100000),...month(2026,9,100000)]).btcChange,evidence().dollarChange);
+assert.equal(evidence([...month(2026,8,100000),...month(2026,9,125000)]).btcChange,0);
+assert.ok(evidence([...month(2026,8,100000),...month(2026,9,50000)]).btcChange<0);
+assert.equal(evidence(samples.concat(samples)).btcChange,25,'Duplicates do not overweight monthly average');
+assert.match(evidence(samples.slice(1)).error,/withheld/);
+assert.match(evidence(samples.concat([{...samples[0],btcUsd:1}])).error,/withheld/);
+assert.match(evidence(samples,benchmark,new Date('2026-09-01')).error,/two whole/);
+assert.match(evidence(samples,benchmark,new Date('2026-10-01')).error,/two whole/);
+assert.match(evidence(samples,{error:'failed'}).error,/failed/);
+assert.equal(evidence().lagged,true,'September is lagged in November, even after recent retrieval');
+const gap={points:[{month:'2026-07',cpi:100},{month:'2026-09',cpi:100}]};
+assert.match(evidence([...month(2026,7,1),...month(2026,8,1),...month(2026,9,1)],gap).error,/withheld/);
+const longPoints=[],longSamples=[];
+for(let y=2024;y<=2026;y++)for(let m=1;m<=12;m++){if(y===2026&&m>9)break;longPoints.push({month:`${y}-${String(m).padStart(2,'0')}`,cpi:100});longSamples.push(...month(y,m,100000));}
+assert.equal(evidence(longSamples,{points:longPoints}).btcChange,0);
+assert.equal(evidence(longSamples,{points:longPoints}).rows.length,33);
+for(const value of [null,0,-1,'',false,Infinity])assert.match(evidence(samples.map((x,i)=>i?x:{...x,btcUsd:value})).error,/withheld/);
+const bls=(data,id='CUUR0000SAF11')=>({status:'REQUEST_SUCCEEDED',Results:{series:[{seriesID:id,data}]}});
+const p={year:'2026',period:'M09',value:'321.758'};
+assert.equal(call('parseFoodCpi_',bls([p,{...p,period:'M13'}]),now).points.length,1);
+assert.equal(call('parseFoodCpi_',bls([p]),now).releaseDate,null,'Never invent release dates from monthly labels');
+assert.throws(()=>call('parseFoodCpi_',bls([p,p]),now),/Duplicate/);
+assert.throws(()=>call('parseFoodCpi_',bls([{...p,period:'M11'}]),now),/unreleased/);
+assert.throws(()=>call('parseFoodCpi_',bls([p],'wrong'),now),/Unexpected/);
+assert.throws(()=>call('parseFoodCpi_',bls([{...p,value:'0'}]),now),/Invalid/);
+let calls=0,cacheValue=null;
+context.CacheService={getScriptCache:()=>({get:()=>cacheValue,put:(k,v)=>{cacheValue=v;}})};
+context.UrlFetchApp={fetch:()=>{calls++;return {getResponseCode:()=>200,getContentText:()=>JSON.stringify(bls([p]))};}};
+assert.equal(call('getFoodAtHomeBenchmark').points[0].cpi,321.758);
+call('getFoodAtHomeBenchmark');assert.equal(calls,1);
+cacheValue=null;context.UrlFetchApp={fetch:()=>{throw Error('offline');}};
+assert.ok(call('getFoodAtHomeBenchmark').error);
+assert.equal(cacheValue,null);
+console.log('Food benchmark tests passed: inverse math, loss/flat, whole-month alignment, short/long windows, leap days, missing/duplicate/conflicting samples, release/vintage guard, source failure and cache.');
+if(process.argv[2]){
+ const official=call('parseFoodCpi_',JSON.parse(fs.readFileSync(process.argv[2],'utf8')),now);
+ const real=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
+ const result=evidence(real,official);
+ console.log(JSON.stringify({officialLatest:official.points.at(-1),realEvidence:result},null,2));
+}
+assert.equal(call('parseFoodCpi_',bls([p,{...p,period:'M08',value:'-'}]),now).points.length,1,'Explicit BLS missing marks remain gaps');
+context.args=[benchmark,samples,null,now,'2026-09','2026-08'];
+assert.match(vm.runInContext('foodEvidence(...args)',context).error,/two whole/);
+context.args=[benchmark,samples,null,now,'2026-08','2026-09'];
+assert.equal(vm.runInContext('foodEvidence(...args)',context).btcChange,25);

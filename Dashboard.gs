@@ -49,6 +49,11 @@ function getPurchasingPowerDashboardData() {
   const referenceSeries = buildReferenceSeries_(Object.keys(grouped).sort(), grouped, references);
   const latest = snapshots.length ? snapshots[snapshots.length - 1] : null;
   const reliability = scheduledReliability_(snapshots,itemSeries,core.map(function(item){return item.id;}),readRefreshSchedule_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(props.refreshLogSheetName)),new Date());
+  // Historical rows predate a durable validation ledger; do not grade them as verified.
+  snapshots.forEach(function(snapshot){
+    if (!reliability.trackingStartDate || snapshot.ts.slice(0,10) < reliability.trackingStartDate)
+      snapshot.items.forEach(function(item){item.validationKnown=false;});
+  });
   // Retain the old view explicitly for comparison; never rewrite historical observations.
   const legacyReliability = buildReliability_(snapshots,itemSeries,core.length,props.legacyReliabilitySearchesPerDay,new Date(),props.reliabilityStartDate);
   return {
