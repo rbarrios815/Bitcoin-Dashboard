@@ -41,9 +41,10 @@
     const first=ordered.find(complete);
     if(!first||new Date(first.ts).getTime()===new Date(last.ts).getTime())return {status:'insufficient',last};
     const change=(Number(first.basketSats)/Number(last.basketSats)-1)*100;
+    const dollarChange=(Number(first.basketUsd)/Number(last.basketUsd)-1)*100;
     const carried=[first,last].some(x=>Number(x.staleCount)>0||(x.items||[]).some(i=>i.isStale));
     const outdated=now-new Date(last.ts).getTime()>48*60*60*1000;
-    return {status:'ready',first,last,change,carried,outdated,provisional:carried||outdated};
+    return {status:'ready',first,last,change,dollarChange,carried,outdated,provisional:carried||outdated};
   }
   function itemData(){return (state.data?.itemSeries||[]).find(x=>x.id===state.item)||null;}
   function filteredItemHistory(){const item=itemData(),start=rangeStart();return (item?.history||[]).filter(x=>(!start||new Date(x.ts)>=start)&&(state.stale==='include'||!x.isStale));}
@@ -72,11 +73,13 @@
       hero.innerHTML=metric('Does Bitcoin buy more groceries?',title,detail,'neutral','answer');
       $('insight').textContent='Choose a wider range or include carried-forward values to inspect available history. Missing packages never count as a cheaper basket.';return;
     }
-    const {first,last,change,provisional}=answer,lastShare=10000/last.basketSats*100,firstShare=10000/first.basketSats*100;
+    const {first,last,change,dollarChange,provisional}=answer,lastShare=10000/last.basketSats*100,firstShare=10000/first.basketSats*100;
     const unchanged=Math.abs(change)<0.005,headline=unchanged?'Bitcoin buys the same groceries':`Bitcoin buys ${Math.abs(change).toFixed(2)}% ${change>0?'more':'fewer'} groceries`;
+    const dollarUnchanged=Math.abs(dollarChange)<0.005;
+    const dollarHeadline=dollarUnchanged?'Dollars buy the same groceries':`Dollars buy ${Math.abs(dollarChange).toFixed(2)}% ${dollarChange>0?'more':'fewer'} groceries`;
     const qualifier=provisional?'Provisional comparison':'Compared with the start of this range';
     const reasons=[answer.carried?'a boundary uses carried-forward grocery prices':'',answer.outdated?'the latest snapshot is over 48 hours old':''].filter(Boolean);
-    hero.innerHTML=metric(qualifier,headline,`${dateText(first.ts)} → ${dateText(last.ts)} · same ${state.data.basketDefinition.itemCount} packages`,provisional?'neutral':unchanged?'neutral':change>0?'good':'bad','answer')+metric('10,000 sats buys',lastShare.toFixed(2)+'% of a basket','Previously '+firstShare.toFixed(2)+'% of the same basket','neutral')+metric('Basket price in dollars',money(last.basketUsd),pctText(pct(first.basketUsd,last.basketUsd))+' over this range','neutral')+metric('Basket price in sats',sats(last.basketSats),pctText(pct(first.basketSats,last.basketSats))+' over this range','neutral');
+    hero.innerHTML=metric(qualifier,headline,`${dateText(first.ts)} → ${dateText(last.ts)} · same ${state.data.basketDefinition.itemCount} packages`,provisional?'neutral':unchanged?'neutral':change>0?'good':'bad','answer')+metric('Dollar purchasing power',dollarHeadline,`${dateText(first.ts)} → ${dateText(last.ts)} · same ${state.data.basketDefinition.itemCount} packages`,provisional?'neutral':dollarUnchanged?'neutral':dollarChange>0?'good':'bad')+metric('10,000 sats buys',lastShare.toFixed(2)+'% of a basket','Previously '+firstShare.toFixed(2)+'% of the same basket','neutral')+metric('Basket price in dollars',money(last.basketUsd),pctText(pct(first.basketUsd,last.basketUsd))+' over this range','neutral')+metric('Basket price in sats',sats(last.basketSats),pctText(pct(first.basketSats,last.basketSats))+' over this range','neutral');
     $('insight').textContent=(reasons.length?'Provisional: '+reasons.join('; ')+'. ':'')+'A satoshi (sat) is a unit of Bitcoin. Holding the same number of sats now buys '+(unchanged?'the same amount':Math.abs(change).toFixed(2)+'% '+(change>0?'more':'fewer')+' groceries')+' against this measured basket. This is a historical comparison, not a forecast.';
   }
   function metric(label,value,delta,cls,extra=''){return `<div class="card metric ${extra}"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div><div class="delta ${cls}">${escapeHtml(delta)}</div></div>`;}
