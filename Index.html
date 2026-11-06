@@ -23,6 +23,16 @@
   </section>
   <section class="hero" id="hero" aria-label="Purchasing-power answer" aria-live="polite"></section>
   <div class="insight" id="insight">—</div>
+  <details class="card" id="foodBenchmark">
+    <summary>What does the evidence say?</summary>
+    <div class="method">
+      <p>Independent benchmark: BLS CPI-U food at home (CUUR0000SAF11), monthly, not seasonally adjusted. This independently sampled national food index is different from our ten-item shopping-search basket.</p>
+      <div class="controls"><div class="control"><label for="benchmarkStart">From month</label><select id="benchmarkStart"></select></div><div class="control"><label for="benchmarkEnd">Through month</label><select id="benchmarkEnd"></select></div></div>
+      <div id="foodBenchmarkResult" aria-live="polite">Expand to load official monthly evidence.</div>
+      <p>Bitcoin uses the mean of one recorded BTC/USD observation per UTC day, with every day required in each month. Both buying-power results use exactly the same calendar months. These are monthly averages, not prices on the CPI publication date. Missing months are never filled.</p>
+      <p><a href="https://fred.stlouisfed.org/series/CUUR0000SAF11" target="_blank" rel="noopener">Official CPI series</a> · <a href="https://www.bls.gov/schedule/news_release/cpi.htm" target="_blank" rel="noopener">BLS release calendar</a></p>
+    </div>
+  </details>
   <div class="grid">
     <main class="stack">
       <section class="card">

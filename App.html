@@ -1,6 +1,6 @@
 <script>
   const $=id=>document.getElementById(id);
-  const state={data:null,range:'all',view:'basket',item:null,stale:'include',unit:'sats',charts:{}};
+  const state={data:null,range:'all',view:'basket',item:null,stale:'include',unit:'sats',charts:{},foodBenchmark:null,benchmarkLoading:false,benchmarkStart:'',benchmarkEnd:''};
   const COLORS=['#f7931a','#5fd4ff','#39d98a','#ffd166','#ff6b7a','#9d8cff','#5ce1c7','#ff9e64','#72a7ff','#d6a7ff'];
 
   function appCall(name,...args){return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[name](...args));}
@@ -44,7 +44,8 @@
     const dollarChange=(Number(first.basketUsd)/Number(last.basketUsd)-1)*100;
     const carried=[first,last].some(x=>Number(x.staleCount)>0||(x.items||[]).some(i=>i.isStale));
     const outdated=now-new Date(last.ts).getTime()>48*60*60*1000;
-    return {status:'ready',first,last,change,dollarChange,carried,outdated,provisional:carried||outdated};
+    const unknownValidation=[first,last].some(x=>(x.items||[]).some(i=>i.validationKnown===false));
+    return {status:'ready',first,last,change,dollarChange,carried,outdated,unknownValidation,provisional:carried||outdated||unknownValidation};
   }
   function itemData(){return (state.data?.itemSeries||[]).find(x=>x.id===state.item)||null;}
   function filteredItemHistory(){const item=itemData(),start=rangeStart();return (item?.history||[]).filter(x=>(!start||new Date(x.ts)>=start)&&(state.stale==='include'||!x.isStale));}
@@ -52,7 +53,7 @@
   function render(){
     if(!state.data)return;
     $('itemControl').style.display=state.view==='item'?'grid':'none';
-    renderHero();renderMainChart();renderContribution();renderDecomposition();renderTable();renderQuality();renderReferences();
+    renderHero();renderMainChart();renderContribution();renderDecomposition();renderTable();renderQuality();renderReferences();renderFoodBenchmark();
     $('updated').textContent='Updated '+new Date(state.data.generatedAt).toLocaleString()+' · '+escapeHtml(state.data.location||'');
   }
 
@@ -78,7 +79,7 @@
     const dollarUnchanged=Math.abs(dollarChange)<0.005;
     const dollarHeadline=dollarUnchanged?'Dollars buy the same groceries':`Dollars buy ${Math.abs(dollarChange).toFixed(2)}% ${dollarChange>0?'more':'fewer'} groceries`;
     const qualifier=provisional?'Provisional comparison':'Compared with the start of this range';
-    const reasons=[answer.carried?'a boundary uses carried-forward grocery prices':'',answer.outdated?'the latest snapshot is over 48 hours old':''].filter(Boolean);
+    const reasons=[answer.carried?'a boundary uses carried-forward grocery prices':'',answer.outdated?'the latest snapshot is over 48 hours old':'',answer.unknownValidation?'historical source or product-match validation is unknown':''].filter(Boolean);
     hero.innerHTML=metric(qualifier,headline,`${dateText(first.ts)} → ${dateText(last.ts)} · same ${state.data.basketDefinition.itemCount} packages`,provisional?'neutral':unchanged?'neutral':change>0?'good':'bad','answer')+metric('Dollar purchasing power',dollarHeadline,`${dateText(first.ts)} → ${dateText(last.ts)} · same ${state.data.basketDefinition.itemCount} packages`,provisional?'neutral':dollarUnchanged?'neutral':dollarChange>0?'good':'bad')+metric('10,000 sats buys',lastShare.toFixed(2)+'% of a basket','Previously '+firstShare.toFixed(2)+'% of the same basket','neutral')+metric('Basket price in dollars',money(last.basketUsd),pctText(pct(first.basketUsd,last.basketUsd))+' over this range','neutral')+metric('Basket price in sats',sats(last.basketSats),pctText(pct(first.basketSats,last.basketSats))+' over this range','neutral');
     $('insight').textContent=(reasons.length?'Provisional: '+reasons.join('; ')+'. ':'')+'A satoshi (sat) is a unit of Bitcoin. Holding the same number of sats now buys '+(unchanged?'the same amount':Math.abs(change).toFixed(2)+'% '+(change>0?'more':'fewer')+' groceries')+' against this measured basket. This is a historical comparison, not a forecast.';
   }
@@ -138,7 +139,80 @@
     $('references').innerHTML=refs.map(ref=>{const rows=ref.history||[],last=rows[rows.length-1];if(!last)return'';return `<div class="ref"><div><div class="ref-name">${escapeHtml(ref.name)}</div><div class="ref-meta">${escapeHtml(ref.description)} · ${escapeHtml(last.source||'')}</div></div><div class="ref-value">${money(last.usd)}<br>${sats(last.sats)}${last.isStale?'<br><span class="neutral">carried</span>':''}</div></div>`;}).join('')||'<div class="empty">No reference history.</div>';
   }
 
+  function foodEvidence(benchmark,snapshots,start=null,now=new Date(),selectedStart='',selectedEnd=''){
+    if(benchmark?.error)return {error:benchmark.error};
+    const points=benchmark?.points||[];
+    if(!points.length)return {error:'No published monthly benchmark is available.'};
+    const days={}, conflicts=new Set();
+    for(const row of snapshots||[]){
+      const time=new Date(row.ts);
+      if(!Number.isFinite(time.getTime())||time>now)continue;
+      const day=time.toISOString().slice(0,10);
+      if(!days[day]||new Date(days[day].ts)<time)days[day]=row;
+      else if(days[day].ts===row.ts&&Number(days[day].btcUsd)!==Number(row.btcUsd))conflicts.add(day);
+    }
+    const availableDays=Object.keys(days).sort();
+    if(!availableDays.length)return {error:'No recorded BTC/USD history to align with BLS.'};
+    const earliest=availableDays[0].slice(0,7), latest=points[points.length-1].month;
+    let month=earliest>points[0].month?earliest:points[0].month;
+    const floor=start?new Date(start):null;
+    const rows=[];
+    while(month<=latest){
+      const first=new Date(month+'-01T00:00:00Z'),next=new Date(Date.UTC(first.getUTCFullYear(),first.getUTCMonth()+1,1));
+      if(!floor||first>=floor){
+        const p=points.find(x=>x.month===month),count=new Date(next-1).getUTCDate();
+        let sum=0,valid=0;
+        for(let n=1;n<=count;n++){
+          const day=month+'-'+String(n).padStart(2,'0'),r=days[day];
+          if(r&&!conflicts.has(day)&&positiveValue(r.btcUsd)){sum+=Number(r.btcUsd);valid++;}
+        }
+        rows.push({month,cpi:p?.cpi??null,btcUsd:valid===count?sum/count:null,days:valid,expectedDays:count});
+      }
+      month=next.toISOString().slice(0,7);
+    }
+    const visible=rows.filter(r=>(!selectedStart||r.month>=selectedStart)&&(!selectedEnd||r.month<=selectedEnd));
+    rows.splice(0,rows.length,...visible);
+    const lagged=latest<new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()-1,1)).toISOString().slice(0,7);
+    if(rows.length<2)return {rows,lagged,error:'At least two whole published months are needed in this range. Try All history.'};
+    const missing=rows.filter(r=>!positiveValue(r.cpi)||!positiveValue(r.btcUsd));
+    if(missing.length)return {rows,lagged,error:'Comparison withheld: missing CPI or incomplete daily BTC samples in '+missing.map(r=>r.month+' ('+r.days+'/'+r.expectedDays+' BTC days)').join(', ')+'. No missing months are bridged.'};
+    const first=rows[0],last=rows[rows.length-1];
+    return {rows,first,last,lagged,btcChange:(last.btcUsd/first.btcUsd*first.cpi/last.cpi-1)*100,dollarChange:(first.cpi/last.cpi-1)*100};
+  }
+  function renderFoodBenchmark(){
+    const target=$('foodBenchmarkResult');
+    if(!state.foodBenchmark)return;
+    const result=foodEvidence(state.foodBenchmark,state.data?.snapshots,rangeStart(),new Date(),state.benchmarkStart,state.benchmarkEnd);
+    let text=result.error||`${result.first.month} → ${result.last.month}: Bitcoin food buying power ${pctText(result.btcChange)}; dollar food buying power ${pctText(result.dollarChange)}. Both use BLS food-at-home CPI for the identical months.`;
+    if(result.lagged)text+=' Publication lag: the latest BLS month is older than the previous calendar month.';
+    text+=' CPI is published after its observation month; it is not a live grocery quote. The BLS API does not supply individual release dates; retrieval time is not the release date, and these are current published values, not historical vintages.';
+    if(state.foodBenchmark.retrievedAt)text+=' Retrieved '+dateText(state.foodBenchmark.retrievedAt)+'.';
+    text+=' BTC/USD comes from recorded Sheet samples; this does not independently validate the shopping-search prices. Historical basket source/match validation can be unknown. No predictive claim is made.';
+    target.textContent=text;
+    if(result.rows?.length){
+      const table=document.createElement('div');table.className='table-wrap';
+      table.innerHTML='<table><thead><tr><th>Month</th><th>Official CPI</th><th>Recorded mean BTC/USD</th><th>BTC sample days</th></tr></thead><tbody>'+result.rows.map(r=>`<tr><td>${escapeHtml(r.month)}</td><td>${positiveValue(r.cpi)?Number(r.cpi).toFixed(3):'Missing'}</td><td>${positiveValue(r.btcUsd)?money(r.btcUsd):'Incomplete'}</td><td>${r.days}/${r.expectedDays}</td></tr>`).join('')+'</tbody></table>';
+      target.appendChild(table);
+    }
+  }
+  async function loadFoodBenchmark(){
+    if(state.foodBenchmark||state.benchmarkLoading)return;
+    state.benchmarkLoading=true;
+    $('foodBenchmarkResult').textContent='Loading official BLS monthly evidence…';
+    try{state.foodBenchmark=await appCall('getFoodAtHomeBenchmark');
+      const points=state.foodBenchmark.points||[], firstDay=(state.data?.snapshots||[]).map(x=>x.ts).sort()[0];
+      const months=points.filter(p=>!firstDay||p.month>=firstDay.slice(0,7)).map(p=>p.month);
+      for(const id of ['benchmarkStart','benchmarkEnd'])$(id).innerHTML=months.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
+      state.benchmarkStart=months[0]||'';state.benchmarkEnd=months[months.length-1]||'';
+      $('benchmarkStart').value=state.benchmarkStart;$('benchmarkEnd').value=state.benchmarkEnd;}
+    catch(e){state.foodBenchmark={error:'Official food benchmark unavailable. Reload to retry.'};}
+    finally{state.benchmarkLoading=false;renderFoodBenchmark();}
+  }
+
   function wire(){
+    $('benchmarkStart').onchange=e=>{state.benchmarkStart=e.target.value;renderFoodBenchmark();};
+    $('benchmarkEnd').onchange=e=>{state.benchmarkEnd=e.target.value;renderFoodBenchmark();};
+    $('foodBenchmark').ontoggle=()=>{if($('foodBenchmark').open)loadFoodBenchmark();};
     $('range').onchange=e=>{state.range=e.target.value;render();};
     $('view').onchange=e=>{state.view=e.target.value;render();};
     $('item').onchange=e=>{state.item=e.target.value;render();};

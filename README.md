@@ -83,3 +83,35 @@ Use **v6 Solo Mining Dashboard** when discussing hashes, hashrate, shares, best 
 
 Keeping these names separate prevents the index dashboard from being mistaken for software that performs Bitcoin mining.
 
+
+## Independent food-at-home benchmark (#112)
+
+Expand **What does the evidence say?** to load official BLS CPI-U food-at-home
+`CUUR0000SAF11` (monthly, not seasonally adjusted). This is a national index,
+not our ten shopping-search packages. No shopping requests or Sheet writes are
+made by this feature. The BLS response is cached for six hours and is loaded only
+on expansion, so it does not delay the main basket answer.
+
+The default window includes every published overlapping month; the month controls
+allow an explicit narrower window. Both BTC and dollar results use identical months.
+Each monthly BTC/USD mean uses the last recorded sample on each UTC day, with all
+calendar days required. Duplicate rows do not increase weight; conflicting same-time
+samples withhold that month. A missing CPI month or BTC day withholds the entire
+selected comparison; no gap is bridged or historical grocery price invented.
+
+Dollar buying-power factor = start CPI / end CPI. Bitcoin buying-power factor =
+(end monthly BTC/USD / start monthly BTC/USD) × (start CPI / end CPI). Subtract one
+and multiply by 100 for percentages, preserving losses and flat outcomes.
+
+The API supplies observation months, not individual publication dates. The UI
+explicitly distinguishes retrieval time, observation month and publication date;
+it makes no historical-vintage claim. The official release-calendar link is shown.
+If the latest CPI predates the previous calendar month, a lag warning appears.
+Pre-ledger shopping observations and rows lacking explicit source/match evidence
+make the custom basket answer provisional. Benchmark results do not validate those
+retail prices or establish investment performance, fees or future outcomes.
+
+Run `node tests/test_food_benchmark.js`, `node tests/run.js` and
+`node tests/test_purchasing_power_answer.js`. Deployment must include
+`FoodBenchmark.gs`; production rollout requires authenticated staging and live
+verification separately from a GitHub merge.
